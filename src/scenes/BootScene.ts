@@ -4,7 +4,7 @@ import { TILE_SIZE, LASER_COLORS } from '../config/constants';
 // All asset keys that can be loaded from files in public/assets/
 const FILE_ASSETS = [
   'player',
-  'wall', 'floor',
+  'wall',
   'enemy-0', 'enemy-1', 'enemy-2', 'enemy-3', 'enemy-boss',
   'bullet-0', 'bullet-1', 'bullet-2', 'bullet-3',
   'enemy-bullet',
@@ -33,7 +33,6 @@ export class BootScene extends Phaser.Scene {
 
   create(): void {
     // Generate programmatic fallback for every missing asset
-    if (this.needs('floor'))        this.makeFloor();
     if (this.needs('wall'))         this.makeWall();
     if (this.needs('player'))       this.makePlayer();
     if (this.needs('enemy-0'))      this.makeEnemy0();
@@ -50,8 +49,10 @@ export class BootScene extends Phaser.Scene {
     if (this.needs('enemy-bullet')) this.makeEnemyBullet();
     // Laser parts are always generated (collectible pickups, tiers 1-3)
     for (let i = 1; i <= 3; i++) this.makeLaserPart(i);
-    // Star is always generated (tiny, no point having a file for it)
+    // Stars are always generated: a 2px dot for the menu backdrops, and
+    // two tiling sheets used as the in-game background.
     this.makeStar();
+    this.makeStarfield();
 
     this.scene.start('Menu');
   }
@@ -62,14 +63,30 @@ export class BootScene extends Phaser.Scene {
 
   // ─── FALLBACK GENERATORS ───────────────────────────────────────────────────
 
-  private makeFloor(): void {
-    const g = this.add.graphics();
-    g.fillStyle(0x07070f);
-    g.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
-    g.lineStyle(1, 0x11112a, 1);
-    g.strokeRect(0, 0, TILE_SIZE, TILE_SIZE);
-    g.generateTexture('floor', TILE_SIZE, TILE_SIZE);
-    g.destroy();
+  /**
+   * Two tiling star sheets. 512 is a power of two, so WebGL repeats them
+   * directly, and it is wide enough that the repeat is hard to notice once
+   * the two layers scroll at different speeds.
+   */
+  private makeStarfield(): void {
+    const sheet = (key: string, count: number, maxRadius: number, maxAlpha: number) => {
+      const g = this.add.graphics();
+      for (let i = 0; i < count; i++) {
+        // A few cold and warm stars keep the field from reading as flat white.
+        const tint = Phaser.Math.RND.pick([0xffffff, 0xffffff, 0xffffff, 0xcfe4ff, 0xffe8c8]);
+        g.fillStyle(tint, Phaser.Math.FloatBetween(maxAlpha * 0.35, maxAlpha));
+        g.fillCircle(
+          Phaser.Math.Between(0, 511),
+          Phaser.Math.Between(0, 511),
+          Phaser.Math.FloatBetween(0.5, maxRadius)
+        );
+      }
+      g.generateTexture(key, 512, 512);
+      g.destroy();
+    };
+
+    sheet('stars-far', 260, 1.1, 0.55);
+    sheet('stars-near', 70, 2.0, 0.95);
   }
 
   private makeWall(): void {

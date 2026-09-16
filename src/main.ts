@@ -1,5 +1,4 @@
 import Phaser from 'phaser';
-import { GAME_WIDTH, GAME_HEIGHT } from './config/constants';
 import { BootScene } from './scenes/BootScene';
 import { MenuScene } from './scenes/MenuScene';
 import { GameScene } from './scenes/GameScene';
@@ -9,8 +8,7 @@ import { LeaderboardScene } from './scenes/LeaderboardScene';
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
-  width: GAME_WIDTH,
-  height: GAME_HEIGHT,
+  parent: 'game',
   backgroundColor: '#000000',
   physics: {
     default: 'arcade',
@@ -20,8 +18,12 @@ const config: Phaser.Types.Core.GameConfig = {
     },
   },
   scale: {
-    mode: Phaser.Scale.FIT,
-    autoCenter: Phaser.Scale.CENTER_BOTH,
+    // RESIZE: the canvas always equals the window, and every scene lays itself
+    // out from Layout.ts. No letterboxing, no fixed 1280x720 world.
+    mode: Phaser.Scale.RESIZE,
+    autoCenter: Phaser.Scale.NO_CENTER,
+    width: '100%',
+    height: '100%',
   },
   scene: [BootScene, MenuScene, GameScene, GameOverScene, VictoryScene, LeaderboardScene],
 };

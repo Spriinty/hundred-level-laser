@@ -1,5 +1,4 @@
-export const GAME_WIDTH = 1280;
-export const GAME_HEIGHT = 720;
+// Screen geometry is no longer fixed — see systems/Layout.ts.
 export const TILE_SIZE = 48;
 export const MAX_LEVEL = 100;
 

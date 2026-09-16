@@ -1,15 +1,14 @@
-import Phaser from 'phaser';
-import { GAME_WIDTH, GAME_HEIGHT } from '../config/constants';
 import { saveScore } from '../systems/Scores';
+import { UiScene } from './UiScene';
 
-export class GameOverScene extends Phaser.Scene {
+export class GameOverScene extends UiScene {
   private level = 0;
   private score = 0;
   private nameEntry = '';
   private submitted = false;
+  private rank = -1;
   private nameText!: Phaser.GameObjects.Text;
   private cursorVisible = true;
-  private hint!: Phaser.GameObjects.Text;
 
   constructor() {
     super({ key: 'GameOver' });
@@ -20,45 +19,8 @@ export class GameOverScene extends Phaser.Scene {
     this.score = data.score;
     this.nameEntry = '';
     this.submitted = false;
+    this.rank = -1;
     this.cursorVisible = true;
-
-    // Stars background
-    for (let i = 0; i < 150; i++) {
-      this.add.image(
-        Phaser.Math.Between(0, GAME_WIDTH),
-        Phaser.Math.Between(0, GAME_HEIGHT),
-        'star'
-      ).setAlpha(Math.random() * 0.7 + 0.1);
-    }
-
-    // Title
-    this.add.text(GAME_WIDTH / 2, 90, 'GAME OVER', {
-      fontFamily: 'monospace', fontSize: '64px',
-      color: '#ff2244', stroke: '#660011', strokeThickness: 8,
-    }).setOrigin(0.5);
-
-    // Stats
-    this.add.text(GAME_WIDTH / 2, 200, `Niveau atteint : ${this.level}/100`, {
-      fontFamily: 'monospace', fontSize: '26px', color: '#ffaa44',
-    }).setOrigin(0.5);
-
-    this.add.text(GAME_WIDTH / 2, 242, `Score : ${this.score.toLocaleString('fr-FR')}`, {
-      fontFamily: 'monospace', fontSize: '22px', color: '#ffcc44',
-    }).setOrigin(0.5);
-
-    // Name entry
-    this.add.text(GAME_WIDTH / 2, 320, 'ENTREZ VOTRE NOM', {
-      fontFamily: 'monospace', fontSize: '20px', color: '#778899',
-    }).setOrigin(0.5);
-
-    this.nameText = this.add.text(GAME_WIDTH / 2, 368, '> _', {
-      fontFamily: 'monospace', fontSize: '36px',
-      color: '#00ff88', stroke: '#003311', strokeThickness: 4,
-    }).setOrigin(0.5);
-
-    this.hint = this.add.text(GAME_WIDTH / 2, 430, 'A-Z · 0-9 · BACKSPACE · ENTRÉE pour valider', {
-      fontFamily: 'monospace', fontSize: '15px', color: '#445566',
-    }).setOrigin(0.5);
 
     // Blinking cursor
     this.time.addEvent({
@@ -85,6 +47,58 @@ export class GameOverScene extends Phaser.Scene {
       }
       this.refreshNameText();
     });
+
+    this.startResponsive();
+  }
+
+  protected draw(): void {
+    const { width, height } = this.layout;
+    const cx = width / 2;
+
+    this.stars(150, 0.1, 0.8);
+
+    this.own(
+      this.add.text(cx, height * 0.125, 'GAME OVER',
+        this.mono(64, '#ff2244', { stroke: '#660011', strokeThickness: 8 })
+      ).setOrigin(0.5)
+    );
+
+    this.own(
+      this.add.text(cx, height * 0.278, `Niveau atteint : ${this.level}/100`,
+        this.mono(26, '#ffaa44')).setOrigin(0.5)
+    );
+
+    this.own(
+      this.add.text(cx, height * 0.336, `Score : ${this.score.toLocaleString('fr-FR')}`,
+        this.mono(22, '#ffcc44')).setOrigin(0.5)
+    );
+
+    this.own(
+      this.add.text(cx, height * 0.444, 'ENTREZ VOTRE NOM', this.mono(20, '#778899'))
+        .setOrigin(0.5)
+    );
+
+    this.nameText = this.own(
+      this.add.text(cx, height * 0.511, '', this.mono(36, '#00ff88', {
+        stroke: '#003311', strokeThickness: 4,
+      })).setOrigin(0.5)
+    );
+    this.refreshNameText();
+
+    if (this.submitted) {
+      this.own(
+        this.add.text(cx, height * 0.62, this.rank >= 0
+          ? `Score sauvegardé — Rang #${this.rank + 1} !`
+          : 'Score sauvegardé !',
+          this.mono(18, '#44ffaa')).setOrigin(0.5)
+      );
+    } else {
+      this.own(
+        this.add.text(cx, height * 0.597, 'A-Z · 0-9 · BACKSPACE · ENTRÉE pour valider',
+          this.mono(15, '#445566', { align: 'center', wordWrap: { width: width * 0.9 } })
+        ).setOrigin(0.5)
+      );
+    }
   }
 
   private refreshNameText(): void {
@@ -95,24 +109,18 @@ export class GameOverScene extends Phaser.Scene {
   private submit(): void {
     this.submitted = true;
     this.cursorVisible = false;
-    this.refreshNameText();
-    this.hint.destroy();
 
-    const rank = saveScore({
+    this.rank = saveScore({
       name: this.nameEntry,
       score: this.score,
       level: this.level,
       date: new Date().toLocaleDateString('fr-FR'),
     });
 
-    this.add.text(GAME_WIDTH / 2, 460, rank >= 0
-      ? `Score sauvegardé — Rang #${rank + 1} !`
-      : 'Score sauvegardé !', {
-      fontFamily: 'monospace', fontSize: '18px', color: '#44ffaa',
-    }).setOrigin(0.5);
+    this.redraw();
 
     this.time.delayedCall(1200, () => {
-      this.scene.start('Leaderboard', { highlightRank: rank });
+      this.scene.start('Leaderboard', { highlightRank: this.rank });
     });
   }
 }

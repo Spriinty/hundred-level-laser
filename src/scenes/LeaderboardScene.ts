@@ -1,105 +1,118 @@
-import Phaser from 'phaser';
-import { GAME_WIDTH, GAME_HEIGHT } from '../config/constants';
 import { loadScores } from '../systems/Scores';
+import { UiScene } from './UiScene';
 
-export class LeaderboardScene extends Phaser.Scene {
+/** Column positions as a fraction of the canvas width. */
+const COLS_LANDSCAPE = [0.0625, 0.109, 0.4375, 0.609, 0.797];
+const COLS_PORTRAIT = [0.05, 0.15, 0.52, 0.80];
+
+export class LeaderboardScene extends UiScene {
+  private highlightRank = -1;
+
   constructor() {
     super({ key: 'Leaderboard' });
   }
 
   create(data: { highlightRank?: number } = {}): void {
+    this.highlightRank = data.highlightRank ?? -1;
+    this.startResponsive();
+  }
+
+  protected draw(): void {
+    const { width, height, portrait } = this.layout;
+    const cx = width / 2;
     const scores = loadScores();
-    const highlightRank = data.highlightRank ?? -1;
 
-    // Stars
-    for (let i = 0; i < 180; i++) {
-      this.add.image(
-        Phaser.Math.Between(0, GAME_WIDTH),
-        Phaser.Math.Between(0, GAME_HEIGHT),
-        'star'
-      ).setAlpha(Math.random() * 0.8 + 0.2);
-    }
+    this.stars(180);
 
-    // Title
-    this.add.text(GAME_WIDTH / 2, 38, 'MEILLEURS SCORES', {
-      fontFamily: 'monospace', fontSize: '42px',
-      color: '#ffcc44', stroke: '#665500', strokeThickness: 6,
-    }).setOrigin(0.5);
+    this.own(
+      this.add.text(cx, height * 0.053, 'MEILLEURS SCORES',
+        this.mono(portrait ? 30 : 42, '#ffcc44', { stroke: '#665500', strokeThickness: 6 })
+      ).setOrigin(0.5)
+    );
 
-    const g = this.add.graphics();
+    const g = this.own(this.add.graphics());
 
-    // Column X positions
-    const cx = [80, 140, 560, 780, 1020];
+    // Portrait is too narrow for the date column, so it is dropped there.
+    const cols = (portrait ? COLS_PORTRAIT : COLS_LANDSCAPE).map(f => f * width);
+    const headers = portrait
+      ? ['#', 'NOM', 'SCORE', 'NIV.']
+      : ['#', 'NOM', 'SCORE', 'NIVEAU', 'DATE'];
 
-    // Header
-    const hy = 110;
-    ['#', 'NOM', 'SCORE', 'NIVEAU', 'DATE'].forEach((h, i) => {
-      this.add.text(cx[i], hy, h, {
-        fontFamily: 'monospace', fontSize: '15px', color: '#778899',
-      });
+    const padX = width * 0.055;
+    const rowW = width - padX * 2;
+    const headerY = height * 0.153;
+
+    headers.forEach((h, i) => {
+      this.own(this.add.text(cols[i], headerY, h, this.mono(15, '#778899')));
     });
     g.lineStyle(1, 0x334455);
-    g.lineBetween(70, hy + 22, GAME_WIDTH - 70, hy + 22);
+    g.lineBetween(padX, headerY + this.sp(22), width - padX, headerY + this.sp(22));
 
     if (scores.length === 0) {
-      this.add.text(GAME_WIDTH / 2, 300, 'Aucun score encore\nJouez et revenez !', {
-        fontFamily: 'monospace', fontSize: '22px',
-        color: '#445566', align: 'center',
-      }).setOrigin(0.5);
+      this.own(
+        this.add.text(cx, height * 0.45, 'Aucun score encore\nJouez et revenez !',
+          this.mono(22, '#445566', { align: 'center' })).setOrigin(0.5)
+      );
     }
+
+    // Fit ten rows between the header and the buttons, whatever the height.
+    const firstRow = headerY + this.sp(36);
+    const bottomY = height - this.sp(96);
+    const rowH = Math.max(20, Math.min(this.sp(46), (bottomY - firstRow) / 10));
+    const barH = rowH - Math.min(8, rowH * 0.18);
 
     const rankColors = ['#ffdd44', '#bbbbbb', '#dd9955'];
 
     scores.slice(0, 10).forEach((entry, i) => {
-      const ry = hy + 36 + i * 46;
-      const isNew = i === highlightRank;
+      const ry = firstRow + i * rowH;
+      const isNew = i === this.highlightRank;
 
-      // Row background
       g.fillStyle(isNew ? 0x0d2a4a : (i % 2 === 0 ? 0x080814 : 0x0c0c1e), isNew ? 0.9 : 0.5);
-      g.fillRect(70, ry - 2, GAME_WIDTH - 140, 38);
+      g.fillRect(padX, ry - 2, rowW, barH);
 
       if (isNew) {
         g.lineStyle(1, 0x2266aa);
-        g.strokeRect(70, ry - 2, GAME_WIDTH - 140, 38);
+        g.strokeRect(padX, ry - 2, rowW, barH);
       }
 
       const textColor = isNew ? '#66ffcc' : (rankColors[i] ?? '#aabbcc');
       const rankStr = i === 0 ? '1er' : i === 1 ? '2e' : i === 2 ? '3e' : `${i + 1}.`;
+      const cells = portrait
+        ? [rankStr, entry.name, entry.score.toLocaleString('fr-FR'), `${entry.level}`]
+        : [rankStr, entry.name, entry.score.toLocaleString('fr-FR'), `Niv. ${entry.level}`, entry.date];
 
-      [rankStr, entry.name, entry.score.toLocaleString('fr-FR'), `Niv. ${entry.level}`, entry.date]
-        .forEach((v, j) => {
-          this.add.text(cx[j], ry + 10, v, {
-            fontFamily: 'monospace',
-            fontSize: isNew ? '19px' : '18px',
-            color: textColor,
-          }).setOrigin(0, 0.5);
-        });
+      cells.forEach((v, j) => {
+        this.own(
+          this.add.text(cols[j], ry - 2 + barH / 2, v, this.mono(isNew ? 19 : 18, textColor))
+            .setOrigin(0, 0.5)
+        );
+      });
 
-      // "NEW" badge for new entry
-      if (isNew) {
-        this.add.text(GAME_WIDTH - 80, ry + 10, '< NOUVEAU', {
-          fontFamily: 'monospace', fontSize: '14px', color: '#44ffaa',
-        }).setOrigin(1, 0.5);
+      // The badge needs room to the right of the last column.
+      if (isNew && !portrait) {
+        this.own(
+          this.add.text(width - padX - this.sp(10), ry - 2 + barH / 2, '< NOUVEAU',
+            this.mono(14, '#44ffaa')).setOrigin(1, 0.5)
+        );
       }
     });
 
     // Buttons
-    const btnStyle = (color: string) => ({
-      fontFamily: 'monospace', fontSize: '28px',
-      color, stroke: '#001122', strokeThickness: 4,
-    });
+    const btnY = height - this.sp(46);
+    const spread = portrait ? width * 0.24 : this.sp(150);
+    const size = portrait ? 22 : 28;
 
-    const menuBtn = this.add.text(GAME_WIDTH / 2 - 150, GAME_HEIGHT - 46, '[ MENU ]', btnStyle('#4488ff'))
-      .setOrigin(0.5).setInteractive({ useHandCursor: true });
-    menuBtn.on('pointerover', () => menuBtn.setStyle({ color: '#88bbff' }));
-    menuBtn.on('pointerout', () => menuBtn.setStyle({ color: '#4488ff' }));
-    menuBtn.on('pointerdown', () => this.scene.start('Menu'));
+    this.button(
+      cx - spread, btnY, '[ MENU ]', size, '#4488ff', '#88bbff',
+      () => this.scene.start('Menu'),
+      { stroke: '#001122', strokeThickness: 4 }
+    );
 
-    const playBtn = this.add.text(GAME_WIDTH / 2 + 150, GAME_HEIGHT - 46, '[ REJOUER ]', btnStyle('#00ff88'))
-      .setOrigin(0.5).setInteractive({ useHandCursor: true });
-    playBtn.on('pointerover', () => playBtn.setStyle({ color: '#88ffcc' }));
-    playBtn.on('pointerout', () => playBtn.setStyle({ color: '#00ff88' }));
-    playBtn.on('pointerdown', () => this.scene.start('Game', { level: 1, score: 0, hp: 3 }));
+    const playBtn = this.button(
+      cx + spread, btnY, '[ REJOUER ]', size, '#00ff88', '#88ffcc',
+      () => this.scene.start('Game', { level: 1, score: 0, hp: 3 }),
+      { stroke: '#001122', strokeThickness: 4 }
+    );
 
     this.tweens.add({
       targets: playBtn, scaleX: 1.04, scaleY: 1.04,
