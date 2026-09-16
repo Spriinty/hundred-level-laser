@@ -62,13 +62,24 @@ const HUD_BAR_MAX_H = 148;
 const MIN_UI = 0.6;
 const MAX_UI = 1.4;
 
+/**
+ * Portrait is measured against a phone-sized reference instead of the
+ * landscape one. Against 1280 wide, every phone scores ~0.30 and pins to
+ * MIN_UI, which is how the HUD ends up unreadable on the device that needs
+ * it most.
+ */
+const PORTRAIT_W = 420;
+const PORTRAIT_H = 840;
+
 function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
 }
 
 export function computeLayout(width: number, height: number): Layout {
   const portrait = height > width;
-  const ui = clamp(Math.min(width / DESIGN_W, height / DESIGN_H), MIN_UI, MAX_UI);
+  const ui = portrait
+    ? clamp(Math.min(width / PORTRAIT_W, height / PORTRAIT_H), MIN_UI, MAX_UI)
+    : clamp(Math.min(width / DESIGN_W, height / DESIGN_H), MIN_UI, MAX_UI);
 
   let hud: Rect;
   let view: Rect;

@@ -12,6 +12,7 @@ import {
 } from '../config/constants';
 import { LevelGenerator } from '../systems/LevelGenerator';
 import { computeLayout, worldZoom, cameraBounds, fs, sp, type Layout } from '../systems/Layout';
+import { TouchControls, isTouchDevice } from '../systems/TouchControls';
 
 type PickupType = 'life' | 'extra-life' | 'dual' | 'rear' | 'shield' | 'bomb' | 'score' | 'armor' | 'laser-part';
 const PICKUP_TYPES: PickupType[] = ['life', 'extra-life', 'dual', 'rear', 'shield', 'bomb', 'score', 'armor'];
@@ -99,6 +100,11 @@ export class GameScene extends Phaser.Scene {
   // Parallax background
   private starLayers: Phaser.GameObjects.TileSprite[] = [];
 
+  // Touch
+  private touch?: TouchControls;
+  private pauseBtn?: Phaser.GameObjects.Text;
+  private touchMode = false;
+
   // Cameras
   private minimap!: Phaser.Cameras.Scene2D.Camera;
   /** Full-canvas, zoom-1 camera. Everything the player reads lives here. */
@@ -148,6 +154,8 @@ export class GameScene extends Phaser.Scene {
     this.floorTiles = [];
     this.centredTexts = [];
     this.starLayers = [];
+    this.touch = undefined;
+    this.pauseBtn = undefined;
   }
 
   create(): void {
@@ -174,6 +182,7 @@ export class GameScene extends Phaser.Scene {
     this.setupCameras();
     this.buildHUD();
     this.buildOverlays();
+    this.setupTouch();
     this.applyLayout();
 
     this.scale.on('resize', this.onResize, this);
@@ -418,6 +427,56 @@ export class GameScene extends Phaser.Scene {
     return obj;
   }
 
+  /**
+   * Builds the touch rig, on touch devices only. Keyboard players get
+   * nothing extra, and the two schemes coexist on hybrids.
+   */
+  private setupTouch(): void {
+    this.touchMode = isTouchDevice();
+    if (!this.touchMode) return;
+
+    // The stick and the pause button have to work at the same time.
+    this.input.addPointer(2);
+
+    this.touch = new TouchControls(this, o => this.addUI(o));
+
+    // Touch players have no ESC key. The padding is there to make the tap
+    // target thumb-sized rather than glyph-sized.
+    this.pauseBtn = this.addUI(
+      this.add.text(0, 0, '\u275a\u275a', {
+        fontFamily: 'monospace', fontSize: '22px', color: '#88bbff',
+        padding: { x: 12, y: 10 },
+      }).setOrigin(0, 0).setScrollFactor(0).setDepth(402).setAlpha(0.75)
+    );
+    this.pauseBtn.setInteractive({ useHandCursor: true });
+    this.pauseBtn.on('pointerdown', () => {
+      if (this.isDead || this.transitioning || this.countingDown) return;
+      if (this.paused) this.resumeGame();
+      else this.pauseGame();
+    });
+
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      if (this.paused || this.isDead || this.transitioning) return;
+      if (!this.touch || this.touch.active) return;
+
+      // The top quarter of the play area belongs to the pause button and the
+      // level readout; the stick lives in the part a thumb actually reaches.
+      const L = this.layout;
+      if (p.y < L.view.y + L.view.h * 0.25) return;
+      if (p.x < L.view.x || p.x > L.view.x + L.view.w) return;
+
+      this.touch.begin(p.x, p.y, p.id);
+    });
+
+    this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
+      this.touch?.drag(p.x, p.y, p.id);
+    });
+
+    const lift = (p: Phaser.Input.Pointer) => this.touch?.release(p.id);
+    this.input.on('pointerup', lift);
+    this.input.on('pointerupoutside', lift);
+  }
+
   private onResize(): void {
     this.applyLayout();
   }
@@ -539,8 +598,14 @@ export class GameScene extends Phaser.Scene {
       this.scoreText.setOrigin(1, 0).setPosition(right, row1).setFontSize(fs(L, 16));
       this.enemyCountText.setOrigin(1, 0).setPosition(right, row2).setFontSize(fs(L, 14));
       this.livesText.setOrigin(0, 0).setPosition(left, row2).setFontSize(fs(L, 14));
-      this.armorText.setOrigin(0, 0).setPosition(left + sp(L, 118), row2).setFontSize(fs(L, 13));
-      this.powerupBar.setOrigin(0, 0).setPosition(left, row3).setFontSize(fs(L, 12));
+      // Armour rides with the hearts: both answer "what is keeping me alive",
+      // and it keeps row 2 clear of the enemy counter on narrow screens.
+      this.armorText.setOrigin(0, 0)
+        .setPosition(left + PLAYER_MAX_HP * sp(L, 22) + sp(L, 6), row1)
+        .setFontSize(fs(L, 13));
+      // Every powerup at once overflows one line on a phone, so let it wrap.
+      this.powerupBar.setOrigin(0, 0).setPosition(left, row3).setFontSize(fs(L, 12))
+        .setWordWrapWidth(right - left);
     } else {
       this.hudPanel.setPosition(hud.x + 1, hud.y + hud.h / 2).setSize(2, hud.h);
 
@@ -549,10 +614,12 @@ export class GameScene extends Phaser.Scene {
       this.enemyCountText.setOrigin(1, 0).setPosition(right, hud.y + sp(L, 34)).setFontSize(fs(L, 15));
       this.livesText.setOrigin(1, 0).setPosition(right, hud.y + sp(L, 78)).setFontSize(fs(L, 15));
       this.armorText.setOrigin(1, 0).setPosition(right, hud.y + sp(L, 96)).setFontSize(fs(L, 14));
-      this.powerupBar.setOrigin(1, 0).setPosition(right, hud.y + sp(L, 122)).setFontSize(fs(L, 13));
+      this.powerupBar.setOrigin(1, 0).setPosition(right, hud.y + sp(L, 122)).setFontSize(fs(L, 13))
+        .setWordWrapWidth(null);
     }
 
     this.updateHearts();
+    this.updateArmorDisplay();
     this.updatePowerupBar();
   }
 
@@ -563,6 +630,9 @@ export class GameScene extends Phaser.Scene {
     this.flashOverlay.setPosition(v.x + v.w / 2, v.y + v.h / 2).setSize(v.w, v.h);
     this.levelText.setPosition(v.x + v.w / 2, v.y + sp(L, 8)).setFontSize(fs(L, 22));
     this.centredTexts.forEach(t => t.setPosition(v.x + v.w / 2, v.y + v.h / 2));
+
+    this.pauseBtn?.setPosition(v.x + sp(L, 4), v.y + sp(L, 2)).setFontSize(fs(L, 22));
+    this.touch?.resize(L.ui);
   }
 
   private updateHearts(): void {
@@ -599,7 +669,9 @@ export class GameScene extends Phaser.Scene {
   private updateArmorDisplay(): void {
     const filled = '◆'.repeat(this.armorPoints);
     const empty = '◇'.repeat(PLAYER_MAX_ARMOR - this.armorPoints);
-    this.armorText.setText(`ARMURE ${filled}${empty}`);
+    // Portrait shows the pips alone: there is no room for the label, and
+    // sitting beside the hearts makes them self-explanatory.
+    this.armorText.setText(`${this.layout.portrait ? '' : 'ARMURE '}${filled}${empty}`);
     this.armorText.setAlpha(this.armorPoints > 0 ? 1 : 0.3);
   }
 
@@ -646,10 +718,11 @@ export class GameScene extends Phaser.Scene {
   // ─── MOVEMENT ──────────────────────────────────────────────────────────────
 
   private movePlayer(): void {
-    const left  = this.cursors.left.isDown  || this.keyA.isDown;
-    const right = this.cursors.right.isDown || this.keyD.isDown;
-    const up    = this.cursors.up.isDown    || this.keyW.isDown;
-    const down  = this.cursors.down.isDown  || this.keyS.isDown;
+    const stick = this.touch?.direction ?? null;
+    const left  = stick === 'left'  || this.cursors.left.isDown  || this.keyA.isDown;
+    const right = stick === 'right' || this.cursors.right.isDown || this.keyD.isDown;
+    const up    = stick === 'up'    || this.cursors.up.isDown    || this.keyW.isDown;
+    const down  = stick === 'down'  || this.cursors.down.isDown  || this.keyS.isDown;
 
     // Strictly 4-directional: horizontal has priority
     if (left) {
@@ -674,7 +747,9 @@ export class GameScene extends Phaser.Scene {
   // ─── SHOOTING ──────────────────────────────────────────────────────────────
 
   private manualShoot(time: number): void {
-    if (!this.spaceKey.isDown) return;
+    // A thumb on the stick has no spare finger for a fire button, and the
+    // ship already aims where it moves, so touch play fires continuously.
+    if (!this.spaceKey.isDown && !this.touchMode) return;
     const rate = FIRE_RATE[this.laserTier];
     if (time - this.lastFired < rate) return;
     this.lastFired = time;
@@ -1182,6 +1257,7 @@ export class GameScene extends Phaser.Scene {
   // ─── PAUSE ─────────────────────────────────────────────────────────────────
 
   private pauseGame(): void {
+    this.touch?.release();
     this.paused = true;
     this.physics.pause();
     this.time.paused = true;

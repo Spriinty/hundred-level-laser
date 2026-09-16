@@ -1,3 +1,4 @@
+import { isTouchDevice } from '../systems/TouchControls';
 import { UiScene } from './UiScene';
 
 export class MenuScene extends UiScene {
@@ -51,14 +52,20 @@ export class MenuScene extends UiScene {
       () => this.scene.start('Leaderboard')
     );
 
-    // Controls
-    this.own(
-      this.add.text(cx, height * 0.84,
-        'WASD / ↑↓←→  Déplacements\n' +
+    // Controls, described for whichever scheme this device will get
+    const controls = isTouchDevice()
+      ? 'Glissez le pouce dans la moitié basse pour vous déplacer\n' +
+        'Le tir part tout seul, dans la direction du vaisseau\n' +
+        'Tuer tous les ennemis du niveau pour avancer\n' +
+        '❚❚ en haut à gauche  Pause'
+      : 'WASD / ↑↓←→  Déplacements\n' +
         'ESPACE  Tirer dans la direction du vaisseau\n' +
         'Tuer tous les ennemis du niveau pour avancer\n' +
-        'ÉCHAP  Pause',
-        this.mono(15, '#556688', { align: 'center' })
+        'ÉCHAP  Pause';
+
+    this.own(
+      this.add.text(cx, height * 0.84, controls,
+        this.mono(15, '#556688', { align: 'center', wordWrap: { width: width * 0.92 } })
       ).setOrigin(0.5)
     );
 
