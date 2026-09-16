@@ -3,6 +3,14 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+  # Redeploy any past version: Actions > Deploy to GitHub Pages > Run workflow,
+  # then give it a tag (v0.2.0), a branch or a commit SHA.
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Tag, branch or commit to deploy'
+        required: false
+        default: 'main'
 
 permissions:
   contents: read
@@ -21,6 +29,8 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
 
       - uses: actions/setup-node@v4
         with:

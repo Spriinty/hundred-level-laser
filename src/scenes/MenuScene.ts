@@ -62,6 +62,12 @@ export class MenuScene extends UiScene {
       ).setOrigin(0.5)
     );
 
+    // Build marker, so it is always clear which version is running.
+    this.own(
+      this.add.text(width - this.sp(10), height - this.sp(8), `v${__APP_VERSION__}`,
+        this.mono(12, '#2c3a4a')).setOrigin(1, 1)
+    );
+
     this.tweens.add({
       targets: btn,
       scaleX: 1.05,
