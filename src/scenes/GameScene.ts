@@ -13,6 +13,7 @@ import {
 import { LevelGenerator } from '../systems/LevelGenerator';
 import { computeLayout, worldZoom, cameraBounds, fs, sp, type Layout } from '../systems/Layout';
 import { TouchControls, isTouchDevice } from '../systems/TouchControls';
+import { getStickSide } from '../systems/Settings';
 
 type PickupType = 'life' | 'extra-life' | 'dual' | 'rear' | 'shield' | 'bomb' | 'score' | 'armor' | 'laser-part';
 const PICKUP_TYPES: PickupType[] = ['life', 'extra-life', 'dual', 'rear', 'shield', 'bomb', 'score', 'armor'];
@@ -184,6 +185,7 @@ export class GameScene extends Phaser.Scene {
     this.buildOverlays();
     this.setupTouch();
     this.applyLayout();
+    this.adoptHeldPointers();
 
     this.scale.on('resize', this.onResize, this);
     this.events.once('shutdown', () => this.scale.off('resize', this.onResize, this));
@@ -432,21 +434,20 @@ export class GameScene extends Phaser.Scene {
    * nothing extra, and the two schemes coexist on hybrids.
    */
   private setupTouch(): void {
-    this.touchMode = isTouchDevice();
-    if (!this.touchMode) return;
-
-    // The stick and the pause button have to work at the same time.
+    // The rig is always built, then switched on or off by applyLayout. That
+    // way resizing the window \u2014 or flipping device emulation in devtools \u2014
+    // takes effect without reloading the page.
     this.input.addPointer(2);
 
     this.touch = new TouchControls(this, o => this.addUI(o));
 
-    // Touch players have no ESC key. The padding is there to make the tap
-    // target thumb-sized rather than glyph-sized.
+    // Touch players have no ESC key. The padding makes the tap target
+    // thumb-sized rather than glyph-sized.
     this.pauseBtn = this.addUI(
       this.add.text(0, 0, '\u275a\u275a', {
         fontFamily: 'monospace', fontSize: '22px', color: '#88bbff',
         padding: { x: 12, y: 10 },
-      }).setOrigin(0, 0).setScrollFactor(0).setDepth(402).setAlpha(0.75)
+      }).setOrigin(0, 0).setScrollFactor(0).setDepth(402).setAlpha(0.75).setVisible(false)
     );
     this.pauseBtn.setInteractive({ useHandCursor: true });
     this.pauseBtn.on('pointerdown', () => {
@@ -457,24 +458,27 @@ export class GameScene extends Phaser.Scene {
 
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
       if (this.paused || this.isDead || this.transitioning) return;
-      if (!this.touch || this.touch.active) return;
-
-      // The top quarter of the play area belongs to the pause button and the
-      // level readout; the stick lives in the part a thumb actually reaches.
-      const L = this.layout;
-      if (p.y < L.view.y + L.view.h * 0.25) return;
-      if (p.x < L.view.x || p.x > L.view.x + L.view.w) return;
-
-      this.touch.begin(p.x, p.y, p.id);
+      this.touch?.pointerDown(p.x, p.y, p.id);
     });
 
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
-      this.touch?.drag(p.x, p.y, p.id);
+      this.touch?.pointerMove(p.x, p.y, p.id);
     });
 
-    const lift = (p: Phaser.Input.Pointer) => this.touch?.release(p.id);
+    const lift = (p: Phaser.Input.Pointer) => this.touch?.pointerUp(p.id);
     this.input.on('pointerup', lift);
     this.input.on('pointerupoutside', lift);
+  }
+
+  /**
+   * Clearing a level restarts the scene, and no pointerdown fires for a finger
+   * that never left the glass. Without this, every level change would force
+   * the player to lift both thumbs and put them back.
+   */
+  private adoptHeldPointers(): void {
+    for (const p of this.input.manager.pointers) {
+      if (p.isDown) this.touch?.pointerDown(p.x, p.y, p.id);
+    }
   }
 
   private onResize(): void {
@@ -631,8 +635,16 @@ export class GameScene extends Phaser.Scene {
     this.levelText.setPosition(v.x + v.w / 2, v.y + sp(L, 8)).setFontSize(fs(L, 22));
     this.centredTexts.forEach(t => t.setPosition(v.x + v.w / 2, v.y + v.h / 2));
 
-    this.pauseBtn?.setPosition(v.x + sp(L, 4), v.y + sp(L, 2)).setFontSize(fs(L, 22));
-    this.touch?.resize(L.ui);
+    // Re-evaluated on every layout change, so plugging in a mouse or opening
+    // device emulation switches schemes without a reload.
+    this.touchMode = isTouchDevice();
+    this.touch?.setEnabled(this.touchMode);
+    this.touch?.place(L, getStickSide());
+
+    this.pauseBtn
+      ?.setVisible(this.touchMode)
+      .setPosition(v.x + sp(L, 4), v.y + sp(L, 2))
+      .setFontSize(fs(L, 22));
   }
 
   private updateHearts(): void {
@@ -747,9 +759,11 @@ export class GameScene extends Phaser.Scene {
   // ─── SHOOTING ──────────────────────────────────────────────────────────────
 
   private manualShoot(time: number): void {
-    // A thumb on the stick has no spare finger for a fire button, and the
-    // ship already aims where it moves, so touch play fires continuously.
-    if (!this.spaceKey.isDown && !this.touchMode) return;
+    // Firing stays on a trigger even on touch. Automatic fire sounds tempting
+    // when the ship aims where it moves, but the cadence is up to 500ms at
+    // tier 0: with an enemy crossing in front of you, waiting for the next
+    // shot to come round on its own is a coin flip rather than a decision.
+    if (!this.spaceKey.isDown && !this.touch?.firing) return;
     const rate = FIRE_RATE[this.laserTier];
     if (time - this.lastFired < rate) return;
     this.lastFired = time;
@@ -1257,7 +1271,7 @@ export class GameScene extends Phaser.Scene {
   // ─── PAUSE ─────────────────────────────────────────────────────────────────
 
   private pauseGame(): void {
-    this.touch?.release();
+    this.touch?.releaseAll();
     this.paused = true;
     this.physics.pause();
     this.time.paused = true;

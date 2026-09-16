@@ -1,4 +1,6 @@
 import Phaser from 'phaser';
+import type { Layout } from './Layout';
+import type { StickSide } from './Settings';
 
 export type Direction = 'left' | 'right' | 'up' | 'down' | null;
 
@@ -7,88 +9,155 @@ const DEAD_ZONE = 11;
 const MAX_TRAVEL = 54;
 
 /**
+ * Top slice of the play area that ignores touches, so reaching for the pause
+ * button or reading the level counter never starts a move or a burst.
+ */
+const IDLE_BAND = 0.2;
+
+/**
  * True on devices driven by a finger rather than a mouse.
  *
- * Deliberately not just "does this support touch": a laptop with a
- * touchscreen and a mouse attached reports a fine pointer, and those players
- * are better served by the keyboard scheme.
+ * `hover: none` is the part that matters: plenty of Windows laptops have a
+ * touchscreen and report a coarse pointer, but if the primary input can hover
+ * there is a mouse on the desk and those players want the keyboard scheme.
  */
 export function isTouchDevice(): boolean {
   return (
     typeof window !== 'undefined' &&
     navigator.maxTouchPoints > 0 &&
-    window.matchMedia('(pointer: coarse)').matches
+    window.matchMedia('(pointer: coarse)').matches &&
+    window.matchMedia('(hover: none)').matches
   );
 }
 
 /**
- * A floating four-way stick.
+ * The on-screen rig: a floating four-way stick on one half of the play area,
+ * a fire button on the other.
  *
- * It appears wherever the thumb lands instead of sitting at a fixed spot:
- * the comfortable thumb position depends on hand size and on which hand is
- * holding the phone, and a fixed stick gets that wrong for most people.
+ * Each control owns its entire half rather than just the circle drawn on it.
+ * The circles are affordances showing where to put a thumb; requiring an
+ * accurate hit on them would make the game feel broken on a small screen.
  *
- * It reports one of four directions rather than a vector, because the ship
- * moves on strict axes — an analogue reading would make it stutter between
- * two of them near the diagonals.
+ * The stick reports a direction rather than a vector, because the ship moves
+ * on strict axes — an analogue reading would make it stutter near the
+ * diagonals.
  */
 export class TouchControls {
   /** Current direction, or null while the stick is idle or centred. */
   direction: Direction = null;
+  /** True while the fire half is held. */
+  firing = false;
 
-  private base: Phaser.GameObjects.Arc;
-  private knob: Phaser.GameObjects.Arc;
-  private pointerId = -1;
-  private origin = new Phaser.Math.Vector2();
+  private enabled = false;
+  private side: StickSide = 'right';
   private travel = MAX_TRAVEL;
   private deadZone = DEAD_ZONE;
+
+  private ghost: Phaser.GameObjects.Arc;
+  private base: Phaser.GameObjects.Arc;
+  private knob: Phaser.GameObjects.Arc;
+  private fireRing: Phaser.GameObjects.Arc;
+  private fireCore: Phaser.GameObjects.Arc;
+
+  private stickPointer = -1;
+  private firePointer = -1;
+  private origin = new Phaser.Math.Vector2();
+
+  private zoneTop = 0;
+  private splitX = 0;
+  private viewLeft = 0;
+  private viewRight = 0;
 
   constructor(
     scene: Phaser.Scene,
     register: <T extends Phaser.GameObjects.GameObject>(obj: T) => T
   ) {
-    this.base = register(
-      scene.add.circle(0, 0, MAX_TRAVEL, 0x88bbff, 0.10)
-        .setStrokeStyle(2, 0x88bbff, 0.35)
-        .setScrollFactor(0).setDepth(400).setVisible(false)
-    );
+    const arc = (radius: number, fill: number, alpha: number, depth: number) =>
+      register(
+        scene.add.circle(0, 0, radius, fill, alpha)
+          .setScrollFactor(0).setDepth(depth).setVisible(false)
+      );
 
-    this.knob = register(
-      scene.add.circle(0, 0, MAX_TRAVEL * 0.42, 0x88bbff, 0.35)
-        .setStrokeStyle(2, 0xbbddff, 0.7)
-        .setScrollFactor(0).setDepth(401).setVisible(false)
-    );
+    // Resting footprint: without it the stick is invisible until touched and
+    // nobody knows it exists.
+    this.ghost = arc(MAX_TRAVEL, 0x88bbff, 0.05, 399)
+      .setStrokeStyle(2, 0x88bbff, 0.22);
+
+    this.base = arc(MAX_TRAVEL, 0x88bbff, 0.10, 400)
+      .setStrokeStyle(2, 0x88bbff, 0.35);
+    this.knob = arc(MAX_TRAVEL * 0.42, 0x88bbff, 0.35, 401)
+      .setStrokeStyle(2, 0xbbddff, 0.7);
+
+    this.fireRing = arc(MAX_TRAVEL, 0xff6644, 0.05, 399)
+      .setStrokeStyle(2, 0xff6644, 0.3);
+    this.fireCore = arc(MAX_TRAVEL * 0.45, 0xff6644, 0.25, 400)
+      .setStrokeStyle(2, 0xff8866, 0.55);
   }
 
-  /** Scale the stick with the rest of the UI. */
-  resize(ui: number): void {
-    this.travel = Math.round(MAX_TRAVEL * ui);
-    this.deadZone = Math.round(DEAD_ZONE * ui);
+  setEnabled(on: boolean): void {
+    if (this.enabled === on) return;
+    this.enabled = on;
+    if (!on) this.releaseAll();
+    this.refresh();
+  }
+
+  /** Position both controls for the current layout and handedness. */
+  place(layout: Layout, side: StickSide): void {
+    this.side = side;
+    this.travel = Math.round(MAX_TRAVEL * layout.ui);
+    this.deadZone = Math.round(DEAD_ZONE * layout.ui);
+
+    const v = layout.view;
+    this.zoneTop = v.y + v.h * IDLE_BAND;
+    this.splitX = v.x + v.w / 2;
+    this.viewLeft = v.x;
+    this.viewRight = v.x + v.w;
+
+    const inset = this.travel + Math.round(28 * layout.ui);
+    const y = v.y + v.h - inset;
+    const near = v.x + inset;
+    const far = v.x + v.w - inset;
+    const stickX = side === 'right' ? far : near;
+    const fireX = side === 'right' ? near : far;
+
+    this.ghost.setPosition(stickX, y).setRadius(this.travel);
     this.base.setRadius(this.travel);
     this.knob.setRadius(Math.round(this.travel * 0.42));
+    this.fireRing.setPosition(fireX, y).setRadius(this.travel);
+    this.fireCore.setPosition(fireX, y).setRadius(Math.round(this.travel * 0.45));
+
+    this.refresh();
   }
 
-  get active(): boolean {
-    return this.pointerId !== -1;
+  pointerDown(x: number, y: number, id: number): void {
+    if (!this.enabled) return;
+    if (y < this.zoneTop || x < this.viewLeft || x > this.viewRight) return;
+
+    const stickHalf = this.side === 'right' ? x >= this.splitX : x < this.splitX;
+
+    if (stickHalf) {
+      if (this.stickPointer !== -1) return;
+      this.stickPointer = id;
+      this.origin.set(x, y);
+      this.direction = null;
+      this.base.setPosition(x, y);
+      this.knob.setPosition(x, y);
+    } else {
+      if (this.firePointer !== -1) return;
+      this.firePointer = id;
+      this.firing = true;
+    }
+    this.refresh();
   }
 
-  /** Plant the stick under a thumb that has just touched down. */
-  begin(x: number, y: number, pointerId: number): void {
-    this.pointerId = pointerId;
-    this.origin.set(x, y);
-    this.direction = null;
-    this.base.setPosition(x, y).setVisible(true);
-    this.knob.setPosition(x, y).setVisible(true);
-  }
-
-  drag(x: number, y: number, pointerId: number): void {
-    if (pointerId !== this.pointerId) return;
+  pointerMove(x: number, y: number, id: number): void {
+    if (id !== this.stickPointer) return;
 
     const dx = x - this.origin.x;
     const dy = y - this.origin.y;
     const dist = Math.hypot(dx, dy);
 
-    // The knob stops at the rim, but the thumb may keep going.
+    // The knob stops at the rim even though the thumb may keep travelling.
     const reach = Math.min(dist, this.travel);
     const ux = dist > 0 ? dx / dist : 0;
     const uy = dist > 0 ? dy / dist : 0;
@@ -99,18 +168,39 @@ export class TouchControls {
       return;
     }
 
-    // Dominant axis wins, which is also how the keyboard resolves two keys.
+    // Dominant axis wins, which is how the keyboard resolves two keys too.
     this.direction = Math.abs(dx) >= Math.abs(dy)
       ? (dx < 0 ? 'left' : 'right')
       : (dy < 0 ? 'up' : 'down');
   }
 
-  /** Lift the stick. Pass a pointer id to ignore other fingers' releases. */
-  release(pointerId?: number): void {
-    if (pointerId !== undefined && pointerId !== this.pointerId) return;
-    this.pointerId = -1;
+  pointerUp(id: number): void {
+    if (id === this.stickPointer) {
+      this.stickPointer = -1;
+      this.direction = null;
+    }
+    if (id === this.firePointer) {
+      this.firePointer = -1;
+      this.firing = false;
+    }
+    this.refresh();
+  }
+
+  /** Drop every touch, e.g. when the game pauses under the player's thumb. */
+  releaseAll(): void {
+    this.stickPointer = -1;
+    this.firePointer = -1;
     this.direction = null;
-    this.base.setVisible(false);
-    this.knob.setVisible(false);
+    this.firing = false;
+    this.refresh();
+  }
+
+  private refresh(): void {
+    const stickHeld = this.stickPointer !== -1;
+    this.ghost.setVisible(this.enabled && !stickHeld);
+    this.base.setVisible(this.enabled && stickHeld);
+    this.knob.setVisible(this.enabled && stickHeld);
+    this.fireRing.setVisible(this.enabled);
+    this.fireCore.setVisible(this.enabled).setAlpha(this.firing ? 1 : 0.7);
   }
 }

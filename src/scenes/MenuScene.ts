@@ -1,3 +1,4 @@
+import { getStickSide, setStickSide } from '../systems/Settings';
 import { isTouchDevice } from '../systems/TouchControls';
 import { UiScene } from './UiScene';
 
@@ -52,10 +53,26 @@ export class MenuScene extends UiScene {
       () => this.scene.start('Leaderboard')
     );
 
+    const touch = isTouchDevice();
+
+    // Handedness. Only worth showing where it changes something.
+    if (touch) {
+      const side = getStickSide();
+      this.button(
+        cx, height * 0.752,
+        side === 'right' ? '[ STICK À DROITE ]' : '[ STICK À GAUCHE ]',
+        18, '#88aaff', '#ccddff',
+        () => {
+          setStickSide(side === 'right' ? 'left' : 'right');
+          this.redraw();
+        }
+      );
+    }
+
     // Controls, described for whichever scheme this device will get
-    const controls = isTouchDevice()
-      ? 'Glissez le pouce dans la moitié basse pour vous déplacer\n' +
-        'Le tir part tout seul, dans la direction du vaisseau\n' +
+    const controls = touch
+      ? 'Pouce sur le stick pour vous déplacer\n' +
+        'Bouton rouge pour tirer\n' +
         'Tuer tous les ennemis du niveau pour avancer\n' +
         '❚❚ en haut à gauche  Pause'
       : 'WASD / ↑↓←→  Déplacements\n' +
