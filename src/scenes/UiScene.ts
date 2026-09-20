@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { computeLayout, fs, sp, type Layout } from '../systems/Layout';
+import { playMusic } from '../systems/Music';
 
 /**
  * Base class for the full-screen menu scenes (menu, game over, victory,
@@ -20,6 +21,9 @@ export abstract class UiScene extends Phaser.Scene {
 
   /** Call at the end of `create()`. */
   protected startResponsive(): void {
+    // Every menu screen shares one track, so walking between them — menu,
+    // leaderboard, game over — never breaks the music.
+    playMusic(this, 'menu');
     this.drawn = [];
     this.redraw();
     this.scale.on('resize', this.redraw, this);

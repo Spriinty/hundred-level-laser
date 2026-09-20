@@ -47,12 +47,13 @@ export class BootScene extends Phaser.Scene {
       if (this.needs(`pickup-${t}`)) this.makePickup(t);
     }
     if (this.needs('enemy-bullet')) this.makeEnemyBullet();
-    // Laser parts are always generated (collectible pickups, tiers 1-3)
-    for (let i = 1; i <= 3; i++) this.makeLaserPart(i);
+    // Laser parts are always generated (collectible pickups, one per tier)
+    for (let i = 0; i <= 3; i++) this.makeLaserPart(i);
     // Stars are always generated: a 2px dot for the menu backdrops, and
     // two tiling sheets used as the in-game background.
     this.makeStar();
     this.makeStarfield();
+    this.makeFlame();
 
     this.scene.start('Menu');
   }
@@ -245,6 +246,24 @@ export class BootScene extends Phaser.Scene {
     g.fillStyle(0xffffff, 0.4);
     g.fillRect(s / 2 - 1, s / 2 - 5, 2, 4);
     g.generateTexture(key, s, s);
+    g.destroy();
+  }
+
+  /**
+   * A soft white blob for the engine plumes. White so that the emitter's own
+   * colour ramp decides what the flame looks like, and soft-edged so the
+   * additive blend builds a glow instead of a disc.
+   */
+  private makeFlame(): void {
+    const g = this.add.graphics();
+    const s = 16;
+    for (let r = s / 2; r > 0; r--) {
+      // Alpha falls off towards the rim; squaring makes the core read hotter.
+      const t = 1 - r / (s / 2);
+      g.fillStyle(0xffffff, 0.12 + t * t * 0.7);
+      g.fillCircle(s / 2, s / 2, r);
+    }
+    g.generateTexture('flame', s, s);
     g.destroy();
   }
 

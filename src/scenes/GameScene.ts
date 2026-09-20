@@ -4,16 +4,19 @@ import {
   PLAYER_SPEED, PLAYER_BASE_HP, PLAYER_MAX_HP, PLAYER_BASE_LIVES, PLAYER_MAX_LIVES,
   PLAYER_MAX_ARMOR,
   BULLET_SPEED, ENEMY_SPEED, BOSS_SPEED,
-  FIRE_RATE, LASER_COLORS, LASER_DAMAGE, SCORE_MULT_DURATION,
-  ENEMY_FIRE_RATE, ENEMY_BULLET_SPEED,
-  LASER_PARTS_NEEDED, LASER_PART_START_LEVEL,
-  getGridSize, getEnemyHP, getEnemyCount,
+  LASER_COLORS, SCORE_MULT_DURATION,
+  ENEMY_BULLET_SPEED, ENEMY_AIM_LEVEL, ENEMY_TELEGRAPH,
+  BOSS_BURST_COUNT, BOSS_BURST_INTERVAL, BOSS_BURST_TELEGRAPH,
+  LASER_PARTS_NEEDED, LASER_STEPS, maxLaserStep, type LaserStep,
+  getGridSize, getEnemyHP, getEnemyCount, getEnemyTier, getEnemyFireRate, getShotPattern,
   isBossLevel, getPickupCount,
 } from '../config/constants';
 import { LevelGenerator } from '../systems/LevelGenerator';
 import { computeLayout, worldZoom, cameraBounds, fs, sp, type Layout } from '../systems/Layout';
 import { TouchControls, isTouchDevice } from '../systems/TouchControls';
 import { getStickSide } from '../systems/Settings';
+import { playMusic } from '../systems/Music';
+import { Thruster, PLAYER_THRUSTER, BOSS_THRUSTER, ENEMY_THRUSTERS, type ThrusterStyle } from '../systems/Thruster';
 
 type PickupType = 'life' | 'extra-life' | 'dual' | 'rear' | 'shield' | 'bomb' | 'score' | 'armor' | 'laser-part';
 const PICKUP_TYPES: PickupType[] = ['life', 'extra-life', 'dual', 'rear', 'shield', 'bomb', 'score', 'armor'];
@@ -43,7 +46,7 @@ export class GameScene extends Phaser.Scene {
   private player!: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
   private playerHP = PLAYER_BASE_HP;
   private lives = PLAYER_BASE_LIVES;
-  private laserTier = 0;
+  private laserStep = 0;
   private laserParts = 0;
   private dualCount = 0;   // extra front lasers (stacks)
   private rearCount = 0;   // rear lasers (stacks)
@@ -53,6 +56,7 @@ export class GameScene extends Phaser.Scene {
   private invincibleTimer = 0;
   private facingAngle = -Math.PI / 2; // start facing up
   private shieldSprite!: Phaser.GameObjects.Arc;
+  private playerThruster!: Thruster;
 
   // Groups
   private bullets!: Phaser.Physics.Arcade.Group;
@@ -131,13 +135,23 @@ export class GameScene extends Phaser.Scene {
     super({ key: 'Game' });
   }
 
-  init(data: { level?: number; score?: number; hp?: number; lives?: number; armor?: number; laserTier?: number; laserParts?: number }): void {
+  /** The player's current rung on the upgrade ladder. */
+  private get laser(): LaserStep {
+    return LASER_STEPS[this.laserStep];
+  }
+
+  /** Bullet colour and texture index, 0-3. Several steps share one tier. */
+  private get laserTier(): number {
+    return this.laser.tier;
+  }
+
+  init(data: { level?: number; score?: number; hp?: number; lives?: number; armor?: number; laserStep?: number; laserParts?: number }): void {
     this.level = data.level ?? 1;
     this.score = data.score ?? 0;
     this.playerHP = data.hp ?? PLAYER_BASE_HP;
     this.lives = data.lives ?? PLAYER_BASE_LIVES;
     this.armorPoints = data.armor ?? 0;
-    this.laserTier = data.laserTier ?? 0;
+    this.laserStep = data.laserStep ?? 0;
     this.laserParts = data.laserParts ?? 0;
     this.dualCount = 0;
     this.rearCount = 0;
@@ -190,8 +204,13 @@ export class GameScene extends Phaser.Scene {
     this.scale.on('resize', this.onResize, this);
     this.events.once('shutdown', () => this.scale.off('resize', this.onResize, this));
 
+    // A no-op from level 2 on: the theme carries across the level restarts.
+    playMusic(this, 'game');
+
     this.scheduleNextPickup();
-    if (this.level >= LASER_PART_START_LEVEL && this.laserTier < 3) {
+    // Parts only drop while there is a rung left to climb at this level. That
+    // gate is what stops a good run from chaining two colours back to back.
+    if (this.laserStep < maxLaserStep(this.level)) {
       this.spawnLaserPart();
     }
     this.startCountdown();
@@ -269,6 +288,7 @@ export class GameScene extends Phaser.Scene {
       .setStrokeStyle(3, 0x44ddff, 0);
 
     this.world.add([this.player, this.shieldSprite]);
+    this.playerThruster = new Thruster(this, this.world, PLAYER_THRUSTER);
   }
 
   // ─── ENEMIES ───────────────────────────────────────────────────────────────
@@ -277,7 +297,7 @@ export class GameScene extends Phaser.Scene {
     this.enemies = this.physics.add.group();
     const hp = getEnemyHP(this.level);
     const count = getEnemyCount(this.level);
-    const tier = Math.min(3, Math.floor((this.level - 1) / 25));
+    const tier = getEnemyTier(this.level);
     const texKey = `enemy-${tier}`;
 
     for (let i = 0; i < Math.min(count, positions.length); i++) {
@@ -290,13 +310,16 @@ export class GameScene extends Phaser.Scene {
       enemy.setData('maxHp', hp);
       enemy.setData('isBoss', false);
       enemy.setData('wanderTimer', Math.random() * 800);
-      enemy.setData('lastShot', -Math.random() * ENEMY_FIRE_RATE);
+      // 0 means "never fired": the opening shot is staggered on the first
+      // live frame, once the countdown is out of the way.
+      enemy.setData('lastShot', 0);
       const er = 44;
       (enemy.body as Phaser.Physics.Arcade.Body).setCircle(er, enemy.displayOriginX - er, enemy.displayOriginY - er);
       // Start with a random direction
       const dir = ENEMY_DIRS[Math.floor(Math.random() * 4)];
       enemy.setVelocity(dir[0], dir[1]);
       enemy.setRotation(Math.atan2(dir[1], dir[0]) + Math.PI / 2);
+      this.attachThruster(enemy, ENEMY_THRUSTERS[tier]);
     }
 
     if (isBossLevel(this.level) && positions.length > count) {
@@ -305,16 +328,19 @@ export class GameScene extends Phaser.Scene {
       const by = bpos.y * TILE_SIZE + TILE_SIZE / 2;
       const boss = this.enemies.create(bx, by, 'enemy-boss') as Phaser.Physics.Arcade.Sprite;
       boss.setDisplaySize(62, 62).setOrigin(0.5, 0.5).setDepth(9);
-      boss.setData('hp', hp * 5);
-      boss.setData('maxHp', hp * 5);
+      // A boss is worth exactly its level number, so level 30 takes 30 hits.
+      boss.setData('hp', this.level);
+      boss.setData('maxHp', this.level);
       boss.setData('isBoss', true);
       boss.setData('wanderTimer', 0);
-      boss.setData('lastShot', -Math.random() * ENEMY_FIRE_RATE * 0.5);
+      boss.setData('lastShot', 0);
+      boss.setData('lastBurst', 0);
       const br = 56;
       (boss.body as Phaser.Physics.Arcade.Body).setCircle(br, boss.displayOriginX - br, boss.displayOriginY - br);
       const bdir = BOSS_DIRS[Math.floor(Math.random() * 4)];
       boss.setVelocity(bdir[0], bdir[1]);
       boss.setRotation(Math.atan2(bdir[1], bdir[0]) + Math.PI / 2);
+      this.attachThruster(boss, BOSS_THRUSTER);
     }
 
     this.world.add(this.enemies.getChildren());
@@ -324,7 +350,10 @@ export class GameScene extends Phaser.Scene {
 
   private setupPhysics(): void {
     this.bullets = this.physics.add.group({ maxSize: 80 });
-    this.enemyBullets = this.physics.add.group({ maxSize: 60 });
+    // Nineteen enemies firing crosses, plus a twelve-bullet boss ring, blows
+    // straight past the old cap of 60 — and an exhausted pool fails silently,
+    // which would read as enemies randomly declining to shoot.
+    this.enemyBullets = this.physics.add.group({ maxSize: 220 });
 
     this.physics.add.collider(this.player, this.walls);
 
@@ -345,7 +374,9 @@ export class GameScene extends Phaser.Scene {
       const enemy = _e as Phaser.Physics.Arcade.Sprite;
       enemy.setData('wanderTimer', 0);
     });
-    this.physics.add.collider(this.enemies, this.enemies);
+    // Deliberately no enemy-vs-enemy collider: two of them meeting used to
+    // jam against each other for a beat, which read as a bug rather than as
+    // a crowd. They cross straight through instead.
 
     this.physics.add.collider(
       this.bullets, this.walls,
@@ -691,10 +722,13 @@ export class GameScene extends Phaser.Scene {
     const lines: string[] = [];
     const tierNames = ['LASER BLEU', 'LASER VERT', 'LASER ORANGE', 'LASER ROUGE'];
     lines.push(tierNames[this.laserTier]);
-    if (this.level >= LASER_PART_START_LEVEL && this.laserTier < 3) {
+    if (this.laserStep < maxLaserStep(this.level)) {
       const filled = '●'.repeat(this.laserParts);
       const empty = '○'.repeat(LASER_PARTS_NEEDED - this.laserParts);
       lines.push(`PIÈCES ${filled}${empty}`);
+    } else if (this.laserStep < LASER_STEPS.length - 1) {
+      // Say why nothing is dropping, otherwise the gate reads as a dry spell.
+      lines.push(`PALIER SUIVANT  NIV. ${LASER_STEPS[this.laserStep + 1].minLevel}`);
     }
     if (this.dualCount > 0) lines.push(`DUAL ×${this.dualCount}`);
     if (this.rearCount > 0) lines.push(`ARRIÈRE ×${this.rearCount}`);
@@ -714,6 +748,10 @@ export class GameScene extends Phaser.Scene {
       if (this.paused) this.resumeGame();
       else this.pauseGame();
     }
+    // Ahead of the early-out below, so the plumes die with the ships rather
+    // than hanging lit in mid-air through a pause or a death.
+    this.updateThrusters();
+
     if (this.isDead || this.transitioning || this.paused || this.countingDown) return;
 
     this.movePlayer();
@@ -725,6 +763,46 @@ export class GameScene extends Phaser.Scene {
     this.scoreText.setText(`Score: ${this.score}`);
     this.updatePowerupBar();
     this.updateEnemyArrows();
+  }
+
+  // ─── THRUSTERS ─────────────────────────────────────────────────────────────
+
+  /**
+   * Hang the plume off the sprite itself. Ships are destroyed from several
+   * places — shot down, caught in a bomb, cleared with the scene — and this
+   * covers all of them at once.
+   */
+  private attachThruster(ship: Phaser.Physics.Arcade.Sprite, style: ThrusterStyle): void {
+    const thruster = new Thruster(this, this.world, style);
+    ship.setData('thruster', thruster);
+    ship.once('destroy', () => thruster.destroy());
+  }
+
+  private updateThrusters(): void {
+    const running = !this.isDead && !this.transitioning && !this.paused && !this.countingDown;
+
+    const pv = this.player.body.velocity;
+    this.playerThruster.update(
+      this.player.x, this.player.y, this.facingAngle,
+      running && (pv.x !== 0 || pv.y !== 0)
+    );
+
+    this.enemies.children.each((go) => {
+      const e = go as Phaser.Physics.Arcade.Sprite;
+      const thruster = e.getData('thruster') as Thruster | undefined;
+      if (!thruster) return true;
+
+      const body = e.body as Phaser.Physics.Arcade.Body | null;
+      if (!e.active || !body) {
+        thruster.update(e.x, e.y, 0, false);
+        return true;
+      }
+
+      // Enemies steer by velocity rather than a facing angle of their own.
+      const v = body.velocity;
+      thruster.update(e.x, e.y, Math.atan2(v.y, v.x), running && (v.x !== 0 || v.y !== 0));
+      return true;
+    });
   }
 
   // ─── MOVEMENT ──────────────────────────────────────────────────────────────
@@ -764,7 +842,7 @@ export class GameScene extends Phaser.Scene {
     // tier 0: with an enemy crossing in front of you, waiting for the next
     // shot to come round on its own is a coin flip rather than a decision.
     if (!this.spaceKey.isDown && !this.touch?.firing) return;
-    const rate = FIRE_RATE[this.laserTier];
+    const rate = this.laser.rate;
     if (time - this.lastFired < rate) return;
     this.lastFired = time;
 
@@ -830,27 +908,124 @@ export class GameScene extends Phaser.Scene {
       }
       e.setData('wanderTimer', wanderTimer);
 
-      // Enemy shooting
-      const lastShot = (e.getData('lastShot') as number) ?? -ENEMY_FIRE_RATE;
-      const rate = isBoss ? ENEMY_FIRE_RATE * 0.6 : ENEMY_FIRE_RATE;
-      if (now - lastShot >= rate) {
-        e.setData('lastShot', now);
-        const vel = (e.body as Phaser.Physics.Arcade.Body).velocity;
-        this.fireEnemyBullet(e.x, e.y, vel);
-      }
+      this.updateEnemyFire(e, isBoss, now);
+      if (isBoss) this.updateBossBurst(e, now);
 
       return true;
     });
   }
 
-  private fireEnemyBullet(x: number, y: number, vel: Phaser.Math.Vector2): void {
-    if (vel.x === 0 && vel.y === 0) return;
+  /**
+   * Enemies wind up before they shoot rather than firing on the frame the
+   * timer expires. Aimed fire with no tell would be unreadable — the player
+   * moves at 220 and the bullets at 300, so the only fair way to make a shot
+   * dodgeable is to announce it.
+   */
+  private updateEnemyFire(e: Phaser.Physics.Arcade.Sprite, isBoss: boolean, now: number): void {
+    const firesAt = (e.getData('firesAt') as number) ?? 0;
+
+    if (firesAt > 0) {
+      if (now < firesAt) return;
+      e.clearTint();
+      e.setData('firesAt', 0);
+      e.setData('lastShot', now);
+      this.fireShotPattern(e, isBoss);
+      return;
+    }
+
+    const rate = getEnemyFireRate(this.level) * (isBoss ? 0.6 : 1);
+
+    let lastShot = (e.getData('lastShot') as number) ?? 0;
+    if (lastShot === 0) {
+      // First live frame. `time.now` runs from game start, not level start,
+      // so without this every enemy on the level would open fire on the same
+      // beat and stay in lockstep from then on — volleys rather than threat.
+      lastShot = now - Math.random() * rate;
+      e.setData('lastShot', lastShot);
+    }
+
+    if (now - lastShot >= rate) {
+      e.setData('firesAt', now + ENEMY_TELEGRAPH);
+      e.setTint(0xff7777);
+    }
+  }
+
+  /**
+   * The boss's own clock, independent of its aimed fire: a ring of bullets
+   * that has to be outrun rather than dodged.
+   */
+  private updateBossBurst(e: Phaser.Physics.Arcade.Sprite, now: number): void {
+    const lastBurst = (e.getData('lastBurst') as number) ?? 0;
+    if (lastBurst === 0) {
+      // Start the clock on the first live frame rather than at game time 0,
+      // which would open the fight with a burst before the player has moved.
+      e.setData('lastBurst', now);
+      return;
+    }
+    if (now - lastBurst < BOSS_BURST_INTERVAL) return;
+    e.setData('lastBurst', now);
+
+    this.tweens.add({
+      targets: e, scaleX: e.scaleX * 1.18, scaleY: e.scaleY * 1.18,
+      duration: BOSS_BURST_TELEGRAPH, yoyo: true, ease: 'Quad.out',
+    });
+    this.time.delayedCall(BOSS_BURST_TELEGRAPH, () => {
+      if (!e.active) return;
+      for (let i = 0; i < BOSS_BURST_COUNT; i++) {
+        this.fireEnemyBullet(e.x, e.y, (i / BOSS_BURST_COUNT) * Math.PI * 2);
+      }
+    });
+  }
+
+  /** Where this enemy is shooting: at the player, or blind down its heading. */
+  private aimAngle(e: Phaser.Physics.Arcade.Sprite): number {
+    if (this.level < ENEMY_AIM_LEVEL) {
+      const vel = (e.body as Phaser.Physics.Arcade.Body).velocity;
+      return Math.atan2(vel.y, vel.x);
+    }
+    return Math.atan2(this.player.y - e.y, this.player.x - e.x);
+  }
+
+  private fireShotPattern(e: Phaser.Physics.Arcade.Sprite, isBoss: boolean): void {
+    const base = this.aimAngle(e);
+    const quarters = [0, Math.PI / 2, Math.PI, -Math.PI / 2];
+
+    // A boss opens with a cross and switches to the windmill once it is half
+    // dead, so the fight has a second half rather than just a longer one.
+    const hp = (e.getData('hp') as number) ?? 1;
+    const maxHp = (e.getData('maxHp') as number) ?? 1;
+    const pattern = isBoss
+      ? (hp <= maxHp / 2 ? 'windmill' : 'cross')
+      : getShotPattern(this.level);
+
+    switch (pattern) {
+      case 'single':
+        this.fireEnemyBullet(e.x, e.y, base);
+        break;
+      case 'axis':
+        this.fireEnemyBullet(e.x, e.y, base);
+        this.fireEnemyBullet(e.x, e.y, base + Math.PI);
+        break;
+      case 'cross':
+        quarters.forEach(q => this.fireEnemyBullet(e.x, e.y, base + q));
+        break;
+      case 'windmill': {
+        // Each volley lands a little further round than the last, which is
+        // what turns four bullets into a spiral over a few seconds.
+        const spin = ((e.getData('spin') as number) ?? 0) + 0.55;
+        e.setData('spin', spin);
+        quarters.forEach(q => this.fireEnemyBullet(e.x, e.y, spin + q));
+        break;
+      }
+    }
+  }
+
+  private fireEnemyBullet(x: number, y: number, angle: number): void {
     const bullet = this.enemyBullets.get(x, y, 'enemy-bullet') as Phaser.Physics.Arcade.Sprite | null;
     if (!bullet || !bullet.body) return;
     this.world.add(bullet);
     const body = bullet.body as Phaser.Physics.Arcade.Body;
     bullet.setDisplaySize(9, 22).setOrigin(0.5, 0.5).setActive(true).setVisible(true).setDepth(9);
-    const angle = Math.atan2(vel.y, vel.x);
     bullet.setRotation(angle + Math.PI / 2);
     const ebr = 11;
     body.setCircle(ebr, bullet.displayOriginX - ebr, bullet.displayOriginY - ebr);
@@ -873,7 +1048,7 @@ export class GameScene extends Phaser.Scene {
   // ─── COMBAT ────────────────────────────────────────────────────────────────
 
   private hitEnemy(enemy: Phaser.Physics.Arcade.Sprite): void {
-    let hp = (enemy.getData('hp') as number) - LASER_DAMAGE[this.laserTier];
+    let hp = (enemy.getData('hp') as number) - this.laser.damage;
     enemy.setData('hp', hp);
 
     this.tweens.add({
@@ -943,7 +1118,7 @@ export class GameScene extends Phaser.Scene {
             hp: PLAYER_BASE_HP,
             lives: this.lives,
             armor: this.armorPoints,
-            laserTier: this.laserTier,
+            laserStep: this.laserStep,
             laserParts: this.laserParts,
           });
         });
@@ -996,11 +1171,22 @@ export class GameScene extends Phaser.Scene {
       case 'laser-part':
         this.laserParts += 1;
         if (this.laserParts >= LASER_PARTS_NEEDED) {
-          this.laserTier = Math.min(3, this.laserTier + 1);
+          const before = this.laser;
+          this.laserStep = Math.min(LASER_STEPS.length - 1, this.laserStep + 1);
           this.laserParts = 0;
-          const tierNames = ['BLEU', 'VERT', 'ORANGE', 'ROUGE'];
-          const hexColor = '#' + LASER_COLORS[this.laserTier].toString(16).padStart(6, '0');
-          this.showMessage(`LASER ${tierNames[this.laserTier]} DÉBLOQUÉ !`, hexColor);
+          const after = this.laser;
+          const hexColor = '#' + LASER_COLORS[after.tier].toString(16).padStart(6, '0');
+
+          // Name what actually changed: a step is a colour, a cadence or a
+          // damage bump, never two at once.
+          if (after.tier !== before.tier) {
+            const tierNames = ['BLEU', 'VERT', 'ORANGE', 'ROUGE'];
+            this.showMessage(`LASER ${tierNames[after.tier]} DÉBLOQUÉ !`, hexColor);
+          } else if (after.rate < before.rate) {
+            this.showMessage('CADENCE DE TIR AMÉLIORÉE !', hexColor);
+          } else {
+            this.showMessage(`DÉGÂTS ${after.damage} !`, hexColor);
+          }
         } else {
           this.showMessage(`PIÈCE LASER  ${this.laserParts}/${LASER_PARTS_NEEDED}`, '#88ffcc');
         }
@@ -1078,7 +1264,10 @@ export class GameScene extends Phaser.Scene {
     const tile = tiles[Math.floor(Math.random() * tiles.length)];
     const px = tile.x * TILE_SIZE + TILE_SIZE / 2;
     const py = tile.y * TILE_SIZE + TILE_SIZE / 2;
-    const p = this.pickups.create(px, py, `laser-part-${this.laserTier + 1}`) as Phaser.Physics.Arcade.Sprite;
+    // The part wears the colour of the laser it leads to, so a cadence step
+    // inside the current colour is visibly not a new weapon.
+    const next = LASER_STEPS[Math.min(this.laserStep + 1, LASER_STEPS.length - 1)];
+    const p = this.pickups.create(px, py, `laser-part-${next.tier}`) as Phaser.Physics.Arcade.Sprite;
     this.world.add(p);
     p.setDisplaySize(36, 36).setOrigin(0.5, 0.5).setAlpha(0).setDepth(6).setData('type', 'laser-part');
     p.refreshBody();
@@ -1275,6 +1464,9 @@ export class GameScene extends Phaser.Scene {
     this.paused = true;
     this.physics.pause();
     this.time.paused = true;
+    // The pause overlay is a menu, so it gets the menu track. The theme is
+    // only paused, and picks up where it left off on resume.
+    playMusic(this, 'menu');
     this.buildPauseOverlay();
   }
 
@@ -1324,6 +1516,7 @@ export class GameScene extends Phaser.Scene {
     this.paused = false;
     this.physics.resume();
     this.time.paused = false;
+    playMusic(this, 'game');
     this.pauseOverlayGroup.forEach(o => o.destroy());
     this.pauseOverlayGroup = [];
   }
@@ -1354,7 +1547,7 @@ export class GameScene extends Phaser.Scene {
         hp: this.playerHP,
         lives: this.lives,
         armor: this.armorPoints,
-        laserTier: this.laserTier,
+        laserStep: this.laserStep,
         laserParts: this.laserParts,
       });
     });

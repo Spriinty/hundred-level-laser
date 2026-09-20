@@ -13,3 +13,14 @@ export function getStickSide(): StickSide {
 export function setStickSide(side: StickSide): void {
   localStorage.setItem(STICK_KEY, side);
 }
+
+const MUSIC_KEY = 'hll-music';
+
+/** Background music plays unless the player has explicitly turned it off. */
+export function isMusicOn(): boolean {
+  return localStorage.getItem(MUSIC_KEY) !== 'off';
+}
+
+export function setMusicOn(on: boolean): void {
+  localStorage.setItem(MUSIC_KEY, on ? 'on' : 'off');
+}

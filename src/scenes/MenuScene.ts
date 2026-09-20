@@ -1,5 +1,6 @@
-import { getStickSide, setStickSide } from '../systems/Settings';
+import { getStickSide, setStickSide, isMusicOn, setMusicOn } from '../systems/Settings';
 import { isTouchDevice } from '../systems/TouchControls';
+import { prefetchMusic, refreshMusic } from '../systems/Music';
 import { UiScene } from './UiScene';
 
 export class MenuScene extends UiScene {
@@ -9,6 +10,9 @@ export class MenuScene extends UiScene {
 
   create(): void {
     this.startResponsive();
+    // The menu is where the player lingers, so it is the cheapest place to
+    // pull the game theme down before a run needs it.
+    prefetchMusic(this, 'game');
   }
 
   protected draw(): void {
@@ -85,6 +89,20 @@ export class MenuScene extends UiScene {
         this.mono(15, '#556688', { align: 'center', wordWrap: { width: width * 0.92 } })
       ).setOrigin(0.5)
     );
+
+    // Music toggle. It sits in the corner rather than in the button column so
+    // it never shifts the menu around on a small screen.
+    const music = isMusicOn();
+    this.button(
+      this.sp(14), this.sp(12),
+      music ? '♪ MUSIQUE' : '♪ MUSIQUE OFF', 16,
+      music ? '#88aaff' : '#445566', '#ccddff',
+      () => {
+        setMusicOn(!music);
+        refreshMusic(this);
+        this.redraw();
+      }
+    ).setOrigin(0, 0);
 
     // Build marker, so it is always clear which version is running.
     this.own(
