@@ -10,6 +10,8 @@ import {
   SEQUENCES, getEnemyPlan, getBossPlan, type FirePlan,
   LASER_PARTS_NEEDED, LASER_STEPS, maxLaserStep, type LaserStep,
   BOMB_RADIUS, BOMB_DAMAGE,
+  TELEPORT_START_LEVEL, PORTAL_RADIUS, PORTAL_EXIT_MARGIN, PORTAL_COOLDOWN,
+  PORTAL_CONTACT_GAP,
   getGridSize, getEnemyHP, getEnemyCount, getEnemyTier, getEnemyFireRate, getChaseBias,
   getPickupBudget,
   isBossLevel, getPickupCount,
@@ -52,6 +54,7 @@ const BOSS_DIRS: [number, number][] = [
 export class GameScene extends Phaser.Scene {
   // Map
   private walls!: Phaser.Physics.Arcade.StaticGroup;
+  private grid: number[][] = [];
   private worldW = 0;
   private worldH = 0;
 
@@ -76,6 +79,7 @@ export class GameScene extends Phaser.Scene {
   private enemyBullets!: Phaser.Physics.Arcade.Group;
   private enemies!: Phaser.Physics.Arcade.Group;
   private pickups!: Phaser.Physics.Arcade.StaticGroup;
+  private portals!: Phaser.Physics.Arcade.StaticGroup;
 
   // Input
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -193,6 +197,7 @@ export class GameScene extends Phaser.Scene {
     this.pauseOverlayGroup = [];
     this.countingDown = false;
     this.floorTiles = [];
+    this.grid = [];
     this.centredTexts = [];
     this.testPanel = [];
     this.testLevelText = undefined;
@@ -219,6 +224,7 @@ export class GameScene extends Phaser.Scene {
     this.buildMap(data.grid, gridSize);
     this.pickups = this.physics.add.staticGroup();
     this.spawnPlayer(data.playerPos);
+    this.spawnPortals(gridSize);
     this.spawnEnemies(data.enemyPositions);
 
     this.setupPhysics();
@@ -275,6 +281,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private buildMap(grid: number[][], gridSize: number): void {
+    this.grid = grid;
     this.buildStarfield();
 
     this.walls = this.physics.add.staticGroup();
@@ -460,6 +467,16 @@ export class GameScene extends Phaser.Scene {
         e.setData('blocked', true);
       }
     );
+
+    this.physics.add.overlap(this.player, this.portals, (_p, portalGO) => {
+      this.usePortal(this.player, portalGO as Phaser.Physics.Arcade.Sprite);
+    });
+
+    // Enemies take the same portals. A shortcut only the player could use
+    // would just make a big map smaller; shared, it cuts both ways.
+    this.physics.add.overlap(this.enemies, this.portals, (enemyGO, portalGO) => {
+      this.usePortal(enemyGO as Phaser.Physics.Arcade.Sprite, portalGO as Phaser.Physics.Arcade.Sprite);
+    });
 
     this.physics.add.overlap(
       this.player, this.pickups,
@@ -1522,6 +1539,175 @@ export class GameScene extends Phaser.Scene {
 
     // Hung off the pickup so collection and level teardown both take it.
     p.once('destroy', () => halo.destroy());
+  }
+
+  // ─── TELEPORTERS ───────────────────────────────────────────────────────────
+
+  /**
+   * A linked pair at opposite corners, on a diagonal picked at random so the
+   * two are always worth crossing the level for.
+   */
+  private spawnPortals(gridSize: number): void {
+    this.portals = this.physics.add.staticGroup();
+    if (this.level < TELEPORT_START_LEVEL || this.floorTiles.length < 2) return;
+
+    const flip = Math.random() < 0.5;
+    const a = this.floorNearest(flip ? 0 : gridSize - 1, 0);
+    const b = this.floorNearest(flip ? gridSize - 1 : 0, gridSize - 1);
+    if (!a || !b || (a.x === b.x && a.y === b.y)) return;
+
+    const first = this.placePortal(a, 'portal', 0x66ddff);
+    const second = this.placePortal(b, 'portal-2', 0xff77bb);
+    first.setData('exit', second);
+    second.setData('exit', first);
+  }
+
+  /** The floor tile closest to a grid corner, skipping the player's doorstep. */
+  private floorNearest(gx: number, gy: number): { x: number; y: number } | null {
+    let best: { x: number; y: number } | null = null;
+    let bestD = Infinity;
+
+    for (const t of this.floorTiles) {
+      const px = t.x * TILE_SIZE + TILE_SIZE / 2;
+      const py = t.y * TILE_SIZE + TILE_SIZE / 2;
+      const sx = px - this.spawnX;
+      const sy = py - this.spawnY;
+      if (sx * sx + sy * sy < (4 * TILE_SIZE) ** 2) continue;
+
+      const d = (t.x - gx) ** 2 + (t.y - gy) ** 2;
+      if (d < bestD) { bestD = d; best = t; }
+    }
+    return best;
+  }
+
+  private placePortal(
+    tile: { x: number; y: number }, key: string, glowColor: number
+  ): Phaser.Physics.Arcade.Sprite {
+    const px = tile.x * TILE_SIZE + TILE_SIZE / 2;
+    const py = tile.y * TILE_SIZE + TILE_SIZE / 2;
+
+    // Depth 0 puts the halo above the starfield at -20 but behind the walls
+    // at 1, so neighbouring tiles occlude it rather than being washed by it.
+    const glow = this.add.image(px, py, 'glow')
+      .setDisplaySize(64, 64)
+      .setTint(glowColor)
+      .setAlpha(0.3)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setDepth(0);
+    this.world.add(glow);
+    this.tweens.add({
+      targets: glow, alpha: 0.52, scale: glow.scale * 1.1,
+      duration: 1500, yoyo: true, repeat: -1, ease: 'Sine.inOut',
+    });
+
+    const p = this.portals.create(px, py, key) as Phaser.Physics.Arcade.Sprite;
+    this.world.add(p);
+    p.setDisplaySize(44, 44).setOrigin(0.5, 0.5).setDepth(4);
+    p.refreshBody();
+    // A static body's radius is in world pixels — StaticBody.setCircle sets
+    // width straight from it, where a dynamic body scales the radius by the
+    // sprite. So this needs none of the source-texture maths the ship and
+    // bullet bodies do, and the art can be any resolution.
+    (p.body as Phaser.Physics.Arcade.StaticBody).setCircle(PORTAL_RADIUS);
+
+    // The rim notches are what make this read as a spin rather than a disc.
+    p.setData('glow', glowColor);
+    this.tweens.add({ targets: p, angle: 360, duration: 6000, repeat: -1, ease: 'Linear' });
+    this.tweens.add({
+      targets: p, scale: p.scale * 1.08, duration: 1100,
+      yoyo: true, repeat: -1, ease: 'Sine.inOut',
+    });
+    return p;
+  }
+
+  /**
+   * Step through to the far portal. The ship comes out past the exit and
+   * still moving: landing on the pad itself would send it straight back on
+   * the next physics step, and the cooldown alone would only turn that into
+   * a slower ping-pong.
+   */
+  private usePortal(ship: Phaser.Physics.Arcade.Sprite, portal: Phaser.Physics.Arcade.Sprite): void {
+    const exit = portal.getData('exit') as Phaser.Physics.Arcade.Sprite | undefined;
+    if (!exit || !ship.active) return;
+
+    const now = this.time.now;
+
+    // You have to step off a pad to use it again. This callback runs on every
+    // physics step while the ship sits on one, so an unbroken run of calls
+    // means it never left — only a gap in them proves it did.
+    const lastTouch = (ship.getData('portalTouch') as number) ?? -PORTAL_CONTACT_GAP * 2;
+    const steppedOff = now - lastTouch > PORTAL_CONTACT_GAP;
+    ship.setData('portalTouch', now);
+    if (!steppedOff) return;
+
+    if (now < ((ship.getData('portalUntil') as number) ?? 0)) return;
+
+    const body = ship.body as Phaser.Physics.Arcade.Body;
+    const vx = body.velocity.x;
+    const vy = body.velocity.y;
+
+    // Carry on the way you were going where there is room, otherwise take
+    // whichever side of the pad is clear. Offsetting blindly along the
+    // heading dropped ships inside the wall whenever the far portal sat
+    // against one, which is most corners.
+    // Clear of the pad means clear of *both* radii. Offsetting by the
+    // portal's alone left the ship still inside the overlap, so it came
+    // straight back the moment the cooldown lapsed — the cooldown only set
+    // the tempo of the ping-pong rather than ending it.
+    const shipR = Math.max(body.halfWidth, body.halfHeight, 8);
+    const out = PORTAL_RADIUS + shipR + PORTAL_EXIT_MARGIN;
+    const heading = (vx !== 0 || vy !== 0)
+      ? Math.atan2(vy, vx)
+      : this.facingAngle;
+    const preferred = Math.round(heading / (Math.PI / 2)) * (Math.PI / 2);
+
+    let ex = 0;
+    let ey = 0;
+    let exitAngle = preferred;
+    let landed = false;
+    for (let i = 0; i < 4; i++) {
+      const a = preferred + i * (Math.PI / 2);
+      const cx = exit.x + Math.cos(a) * out;
+      const cy = exit.y + Math.sin(a) * out;
+      if (this.isFloor(cx, cy)) { ex = cx; ey = cy; exitAngle = a; landed = true; break; }
+    }
+    // Walled in on all four sides: refuse rather than drop the ship onto the
+    // pad, which would start the ping-pong all over again.
+    if (!landed) return;
+
+    // body.reset() zeroes the velocity, so it has to be put back — an enemy
+    // would otherwise sit frozen until its wander timer came round. It leaves
+    // along the side it actually came out of, not the one it wanted.
+    ship.setData('portalUntil', now + PORTAL_COOLDOWN);
+    const speed = Math.hypot(vx, vy);
+    body.reset(ex, ey);
+    body.setVelocity(Math.cos(exitAngle) * speed, Math.sin(exitAngle) * speed);
+
+    this.portalFlash(portal);
+    this.portalFlash(exit);
+    if (ship === this.player) this.flashScreen(0x66ddff, 0.25, 180);
+  }
+
+  /** Whether a world point sits on a walkable tile. */
+  private isFloor(worldX: number, worldY: number): boolean {
+    const tx = Math.floor(worldX / TILE_SIZE);
+    const ty = Math.floor(worldY / TILE_SIZE);
+    const row = this.grid[ty];
+    return row !== undefined && row[tx] === 0;
+  }
+
+  private portalFlash(portal: Phaser.Physics.Arcade.Sprite): void {
+    const color = (portal.getData('glow') as number) ?? 0x66ddff;
+    const ring = this.add.circle(portal.x, portal.y, PORTAL_RADIUS, color, 0.2)
+      .setStrokeStyle(3, color, 0.9)
+      .setDepth(5)
+      .setScale(0.4);
+    this.world.add(ring);
+    this.tweens.add({
+      targets: ring, scale: 2.1, alpha: 0,
+      duration: 380, ease: 'Quad.out',
+      onComplete: () => ring.destroy(),
+    });
   }
 
   private spawnLaserPart(): void {

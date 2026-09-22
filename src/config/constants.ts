@@ -99,6 +99,35 @@ export const LASER_PARTS_NEEDED = 5;
 export const BOMB_RADIUS = 7 * TILE_SIZE;
 export const BOMB_DAMAGE = 25;
 
+// ─── TELEPORTERS ────────────────────────────────────────────────────────────
+
+/**
+ * A linked pair of portals at opposite corners of the map.
+ *
+ * They are shared: enemies step through them too. That is the whole point —
+ * a one-way shortcut for the player would only make a big map smaller, while
+ * a shared one cuts both ways. You can shake a pursuer, and something can
+ * arrive behind you.
+ *
+ * They start where the maps first grow past their opening size, since that is
+ * where crossing the level begins to cost anything.
+ */
+export const TELEPORT_START_LEVEL = 11;
+export const PORTAL_RADIUS = 20;
+/** How far past the far portal you come out. Keeps you off the pad. */
+export const PORTAL_EXIT_MARGIN = 6;
+/** Safety net behind the exit offset, in ms. */
+export const PORTAL_COOLDOWN = 600;
+/**
+ * A break in contact this long counts as having left the pad.
+ *
+ * The overlap fires on every physics step, so an unbroken run of them proves
+ * the ship never got off, and a gap proves it did. A timer alone cannot tell
+ * the two apart — which is why the first attempt at this merely set the tempo
+ * of the ping-pong instead of ending it.
+ */
+export const PORTAL_CONTACT_GAP = 120;
+
 // ─── ENEMY THREAT ───────────────────────────────────────────────────────────
 
 export const ENEMY_BULLET_SPEED = 300;

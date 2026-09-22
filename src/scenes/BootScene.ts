@@ -10,6 +10,7 @@ const FILE_ASSETS = [
   'enemy-bullet', 'enemy-bullet-aimed',
   'pickup-life', 'pickup-extra-life', 'pickup-dual', 'pickup-rear',
   'pickup-shield', 'pickup-bomb', 'pickup-armor',
+  'portal', 'portal-2',
 ] as const;
 
 export class BootScene extends Phaser.Scene {
@@ -48,6 +49,8 @@ export class BootScene extends Phaser.Scene {
     }
     if (this.needs('enemy-bullet')) this.makeEnemyBullet();
     if (this.needs('enemy-bullet-aimed')) this.makeEnemyBulletAimed();
+    if (this.needs('portal')) this.makePortal('portal', 0x66ddff);
+    if (this.needs('portal-2')) this.makePortal('portal-2', 0xff77bb);
     // Laser parts are always generated (collectible pickups, one per tier)
     for (let i = 0; i <= 3; i++) this.makeLaserPart(i);
     // Stars are always generated: a 2px dot for the menu backdrops, and
@@ -55,6 +58,7 @@ export class BootScene extends Phaser.Scene {
     this.makeStar();
     this.makeStarfield();
     this.makeFlame();
+    this.makeGlow();
 
     this.scene.start('Menu');
   }
@@ -227,6 +231,30 @@ export class BootScene extends Phaser.Scene {
     g.destroy();
   }
 
+  /**
+   * A teleporter ring. The notches around the rim are there so that the slow
+   * spin applied in game reads as motion — a plain circle would look static
+   * however fast it turned.
+   */
+  private makePortal(key: string, color: number): void {
+    const g = this.add.graphics();
+    const s = 48;
+    const c = s / 2;
+    g.fillStyle(color, 0.22);
+    g.fillCircle(c, c, c - 4);
+    g.lineStyle(3, color, 0.95);
+    g.strokeCircle(c, c, c - 3);
+    g.lineStyle(2, 0xaa88ff, 0.7);
+    g.strokeCircle(c, c, c - 10);
+    g.fillStyle(0xffffff, 0.85);
+    for (let i = 0; i < 6; i++) {
+      const a = (Math.PI * 2 * i) / 6;
+      g.fillCircle(c + Math.cos(a) * (c - 6), c + Math.sin(a) * (c - 6), 2);
+    }
+    g.generateTexture(key, s, s);
+    g.destroy();
+  }
+
   private makePickup(type: string): void {
     const colors: Record<string, number> = {
       life: 0xff4466, 'extra-life': 0xffaa00,
@@ -285,6 +313,31 @@ export class BootScene extends Phaser.Scene {
     }
     g.generateTexture('flame', s, s);
     g.destroy();
+  }
+
+  /**
+   * A soft halo, drawn as a true radial gradient on a canvas rather than as
+   * stacked circles like `flame`.
+   *
+   * `flame` is built from eight filled circles whose outermost ring still
+   * sits at 12% alpha, which is invisible on a 16px particle but becomes a
+   * hard-edged disc the moment it is blown up to portal size — the falloff
+   * has to actually reach zero. A gradient also has no banding.
+   */
+  private makeGlow(): void {
+    const s = 64;
+    const tex = this.textures.createCanvas('glow', s, s);
+    if (!tex) return;
+
+    const ctx = tex.getContext();
+    const grd = ctx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+    grd.addColorStop(0, 'rgba(255,255,255,0.9)');
+    grd.addColorStop(0.4, 'rgba(255,255,255,0.32)');
+    grd.addColorStop(0.75, 'rgba(255,255,255,0.08)');
+    grd.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 0, s, s);
+    tex.refresh();
   }
 
   private makeStar(): void {
