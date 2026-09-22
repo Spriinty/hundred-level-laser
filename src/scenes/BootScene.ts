@@ -7,9 +7,9 @@ const FILE_ASSETS = [
   'wall',
   'enemy-0', 'enemy-1', 'enemy-2', 'enemy-3', 'enemy-boss',
   'bullet-0', 'bullet-1', 'bullet-2', 'bullet-3',
-  'enemy-bullet',
+  'enemy-bullet', 'enemy-bullet-aimed',
   'pickup-life', 'pickup-extra-life', 'pickup-dual', 'pickup-rear',
-  'pickup-shield', 'pickup-bomb', 'pickup-score', 'pickup-armor',
+  'pickup-shield', 'pickup-bomb', 'pickup-armor',
 ] as const;
 
 export class BootScene extends Phaser.Scene {
@@ -43,10 +43,11 @@ export class BootScene extends Phaser.Scene {
     for (let i = 0; i < 4; i++) {
       if (this.needs(`bullet-${i}`)) this.makeBullet(i);
     }
-    for (const t of ['life','extra-life','dual','rear','shield','bomb','score','armor'] as const) {
+    for (const t of ['life','extra-life','dual','rear','shield','bomb','armor'] as const) {
       if (this.needs(`pickup-${t}`)) this.makePickup(t);
     }
     if (this.needs('enemy-bullet')) this.makeEnemyBullet();
+    if (this.needs('enemy-bullet-aimed')) this.makeEnemyBulletAimed();
     // Laser parts are always generated (collectible pickups, one per tier)
     for (let i = 0; i <= 3; i++) this.makeLaserPart(i);
     // Stars are always generated: a 2px dot for the menu backdrops, and
@@ -207,11 +208,30 @@ export class BootScene extends Phaser.Scene {
     g.destroy();
   }
 
+  /**
+   * The round fired when an enemy has actually taken aim. It has to be
+   * legible at a glance among the blind shots, so it is wider, hotter and
+   * barbed rather than a recolour. Drop `enemy-bullet-aimed.png` into
+   * public/assets/ and it takes over with no code change.
+   */
+  private makeEnemyBulletAimed(): void {
+    const g = this.add.graphics();
+    g.fillStyle(0xff3322);
+    g.fillTriangle(4, 0, 8, 7, 0, 7);
+    g.fillRect(1, 6, 6, 10);
+    g.fillStyle(0xffdd66, 0.9);
+    g.fillRect(3, 2, 2, 9);
+    g.fillStyle(0xff8866, 0.55);
+    g.fillRect(-1, 4, 10, 9);
+    g.generateTexture('enemy-bullet-aimed', 8, 18);
+    g.destroy();
+  }
+
   private makePickup(type: string): void {
     const colors: Record<string, number> = {
       life: 0xff4466, 'extra-life': 0xffaa00,
       dual: 0x4466ff, rear: 0xff6644,
-      shield: 0x44ddff, bomb: 0xffdd44, score: 0xaaff44, armor: 0x44aaff,
+      shield: 0x44ddff, bomb: 0xffdd44, armor: 0x44aaff,
     };
     const color = colors[type] ?? 0xffffff;
     const key = `pickup-${type}`;

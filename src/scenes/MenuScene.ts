@@ -1,4 +1,4 @@
-import { getStickSide, setStickSide, isMusicOn, setMusicOn } from '../systems/Settings';
+import { getStickSide, setStickSide, isMusicOn, setMusicOn, isTestMode, setTestMode } from '../systems/Settings';
 import { isTouchDevice } from '../systems/TouchControls';
 import { prefetchMusic, refreshMusic } from '../systems/Music';
 import { UiScene } from './UiScene';
@@ -103,6 +103,19 @@ export class MenuScene extends UiScene {
         this.redraw();
       }
     ).setOrigin(0, 0);
+
+    // Test mode, opposite the music toggle. Deliberately plain and out of the
+    // way: it is a tuning tool, not a feature of the game.
+    const test = isTestMode();
+    this.button(
+      width - this.sp(14), this.sp(12),
+      test ? '⚙ TEST ON' : '⚙ TEST', 14,
+      test ? '#ff44aa' : '#445566', '#ff88cc',
+      () => {
+        setTestMode(!test);
+        this.redraw();
+      }
+    ).setOrigin(1, 0);
 
     // Build marker, so it is always clear which version is running.
     this.own(
