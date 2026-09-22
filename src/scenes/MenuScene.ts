@@ -1,18 +1,40 @@
-import { getStickSide, setStickSide, isMusicOn, setMusicOn, isTestMode, setTestMode } from '../systems/Settings';
 import { isTouchDevice } from '../systems/TouchControls';
-import { prefetchMusic, refreshMusic } from '../systems/Music';
+import { prefetchMusic } from '../systems/Music';
+import { Pad } from '../systems/Pad';
 import { UiScene } from './UiScene';
+
+const PAD_CONTROLS =
+  'Stick gauche ou croix directionnelle  Déplacements\n' +
+  'A ou gâchette droite  Tirer\n' +
+  'Tuer tous les ennemis du niveau pour avancer\n' +
+  'START  Pause';
 
 export class MenuScene extends UiScene {
   constructor() {
     super({ key: 'Menu' });
   }
 
+  private pad!: Pad;
+  private padWasConnected = false;
+
   create(): void {
+    this.pad = new Pad(this);
     this.startResponsive();
     // The menu is where the player lingers, so it is the cheapest place to
     // pull the game theme down before a run needs it.
     prefetchMusic(this, 'game');
+  }
+
+  update(): void {
+    // A pad stays invisible to the page until one of its buttons is pressed,
+    // so the hints have to be able to change after the menu is drawn.
+    if (this.pad.connected !== this.padWasConnected) {
+      this.padWasConnected = this.pad.connected;
+      this.redraw();
+    }
+    if (this.pad.confirmJustPressed()) {
+      this.scene.start('Game', { level: 1, score: 0, hp: 3 });
+    }
   }
 
   protected draw(): void {
@@ -57,24 +79,17 @@ export class MenuScene extends UiScene {
       () => this.scene.start('Leaderboard')
     );
 
+    this.button(
+      cx, height * 0.752, '[ OPTIONS ]', 22, '#88aaff', '#ccddff',
+      () => this.scene.start('Options')
+    );
+
     const touch = isTouchDevice();
 
-    // Handedness. Only worth showing where it changes something.
-    if (touch) {
-      const side = getStickSide();
-      this.button(
-        cx, height * 0.752,
-        side === 'right' ? '[ STICK À DROITE ]' : '[ STICK À GAUCHE ]',
-        18, '#88aaff', '#ccddff',
-        () => {
-          setStickSide(side === 'right' ? 'left' : 'right');
-          this.redraw();
-        }
-      );
-    }
-
     // Controls, described for whichever scheme this device will get
-    const controls = touch
+    const controls = this.pad.connected
+      ? PAD_CONTROLS
+      : touch
       ? 'Pouce sur le stick pour vous déplacer\n' +
         'Bouton rouge pour tirer\n' +
         'Tuer tous les ennemis du niveau pour avancer\n' +
@@ -89,33 +104,6 @@ export class MenuScene extends UiScene {
         this.mono(15, '#556688', { align: 'center', wordWrap: { width: width * 0.92 } })
       ).setOrigin(0.5)
     );
-
-    // Music toggle. It sits in the corner rather than in the button column so
-    // it never shifts the menu around on a small screen.
-    const music = isMusicOn();
-    this.button(
-      this.sp(14), this.sp(12),
-      music ? '♪ MUSIQUE' : '♪ MUSIQUE OFF', 16,
-      music ? '#88aaff' : '#445566', '#ccddff',
-      () => {
-        setMusicOn(!music);
-        refreshMusic(this);
-        this.redraw();
-      }
-    ).setOrigin(0, 0);
-
-    // Test mode, opposite the music toggle. Deliberately plain and out of the
-    // way: it is a tuning tool, not a feature of the game.
-    const test = isTestMode();
-    this.button(
-      width - this.sp(14), this.sp(12),
-      test ? '⚙ TEST ON' : '⚙ TEST', 14,
-      test ? '#ff44aa' : '#445566', '#ff88cc',
-      () => {
-        setTestMode(!test);
-        this.redraw();
-      }
-    ).setOrigin(1, 0);
 
     // Build marker, so it is always clear which version is running.
     this.own(

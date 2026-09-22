@@ -56,17 +56,36 @@ export abstract class UiScene extends Phaser.Scene {
     return { fontFamily: 'monospace', fontSize: this.fs(size), color, ...extra };
   }
 
+  /**
+   * The sky, drawn once and kept as data.
+   *
+   * Stored as fractions of the viewport rather than pixels, so the same stars
+   * land in the same places whatever the window size.
+   */
+  private sky: { fx: number; fy: number; alpha: number }[] = [];
+
   /** Scatter a starfield across the whole canvas at the reference density. */
   protected stars(count: number, minAlpha = 0.2, maxAlpha = 1): void {
     const { width, height } = this.layout;
     const density = Math.min(3, (width * height) / (1280 * 720));
     const n = Math.round(count * Math.max(0.5, density));
 
+    // Positions are drawn once and reused. `redraw()` runs on every option
+    // toggle, not only on resize, so rolling them here made the stars jump
+    // whenever a setting changed — a draw pass has to be a pure function of
+    // the layout and the state, never of the random number generator.
+    while (this.sky.length < n) {
+      this.sky.push({
+        fx: Math.random(),
+        fy: Math.random(),
+        alpha: Phaser.Math.FloatBetween(minAlpha, maxAlpha),
+      });
+    }
+
     for (let i = 0; i < n; i++) {
+      const star = this.sky[i];
       this.own(
-        this.add
-          .image(Phaser.Math.Between(0, width), Phaser.Math.Between(0, height), 'star')
-          .setAlpha(Phaser.Math.FloatBetween(minAlpha, maxAlpha))
+        this.add.image(star.fx * width, star.fy * height, 'star').setAlpha(star.alpha)
       );
     }
   }

@@ -13,8 +13,6 @@ const FILES: Record<Track, string> = {
   game: 'music/jeu.mp3',
 };
 
-const VOLUME = 0.35;
-
 // Phaser's sound manager belongs to the game, not the scene, so a track keeps
 // playing across `scene.start`. Tracks are kept and paused rather than
 // destroyed: stepping into the pause menu and back out returns to the same
@@ -76,7 +74,7 @@ export function refreshMusic(scene: Phaser.Scene): void {
 function resume(scene: Phaser.Scene, track: Track): void {
   let sound = sounds.get(track);
   if (!sound) {
-    sound = scene.sound.add(KEYS[track], { loop: true, volume: VOLUME });
+    sound = scene.sound.add(KEYS[track], { loop: true, volume: 1 });
     sounds.set(track, sound);
   }
 

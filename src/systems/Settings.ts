@@ -14,15 +14,33 @@ export function setStickSide(side: StickSide): void {
   localStorage.setItem(STICK_KEY, side);
 }
 
-const MUSIC_KEY = 'hll-music';
+const VOLUME_KEY = 'hll-volume';
+const LEGACY_MUSIC_KEY = 'hll-music';
 
-/** Background music plays unless the player has explicitly turned it off. */
-export function isMusicOn(): boolean {
-  return localStorage.getItem(MUSIC_KEY) !== 'off';
+/** Comfortable by default rather than full blast. */
+export const DEFAULT_VOLUME = 0.35;
+
+/**
+ * Output volume, 0 to 1. Zero is the off switch, so there is no separate mute
+ * setting to contradict it.
+ */
+export function getVolume(): number {
+  const raw = localStorage.getItem(VOLUME_KEY);
+  if (raw === null) {
+    // Carry over the on/off toggle this replaced, for anyone who had set it.
+    return localStorage.getItem(LEGACY_MUSIC_KEY) === 'off' ? 0 : DEFAULT_VOLUME;
+  }
+  const v = Number(raw);
+  return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : DEFAULT_VOLUME;
 }
 
-export function setMusicOn(on: boolean): void {
-  localStorage.setItem(MUSIC_KEY, on ? 'on' : 'off');
+export function setVolume(v: number): void {
+  localStorage.setItem(VOLUME_KEY, String(Math.min(1, Math.max(0, v))));
+}
+
+/** Whether there is any point fetching the music at all. */
+export function isMusicOn(): boolean {
+  return getVolume() > 0;
 }
 
 const TEST_KEY = 'hll-test';

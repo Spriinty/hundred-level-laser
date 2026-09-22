@@ -19,6 +19,7 @@ import {
 import { LevelGenerator } from '../systems/LevelGenerator';
 import { computeLayout, worldZoom, cameraBounds, fs, sp, type Layout } from '../systems/Layout';
 import { TouchControls, isTouchDevice } from '../systems/TouchControls';
+import { Pad } from '../systems/Pad';
 import { getStickSide, isTestMode } from '../systems/Settings';
 import { playMusic } from '../systems/Music';
 import { Thruster, PLAYER_THRUSTER, BOSS_THRUSTER, ENEMY_THRUSTERS, type ThrusterStyle } from '../systems/Thruster';
@@ -64,6 +65,8 @@ export class GameScene extends Phaser.Scene {
   private lives = PLAYER_BASE_LIVES;
   private laserStep = 0;
   private laserParts = 0;
+  /** The level the current laser part was picked up on. */
+  private partTakenAt = 0;
   private dualCount = 0;   // extra front lasers (stacks)
   private rearCount = 0;   // rear lasers (stacks)
   private shieldActive = false;
@@ -89,6 +92,7 @@ export class GameScene extends Phaser.Scene {
   private keyD!: Phaser.Input.Keyboard.Key;
   private spaceKey!: Phaser.Input.Keyboard.Key;
   private escKey!: Phaser.Input.Keyboard.Key;
+  private pad!: Pad;
 
   // HUD
   private heartTexts: Phaser.GameObjects.Text[] = [];
@@ -174,7 +178,7 @@ export class GameScene extends Phaser.Scene {
     return this.laser.tier;
   }
 
-  init(data: { level?: number; score?: number; hp?: number; lives?: number; armor?: number; laserStep?: number; laserParts?: number }): void {
+  init(data: { level?: number; score?: number; hp?: number; lives?: number; armor?: number; laserStep?: number; laserParts?: number; partTakenAt?: number }): void {
     this.level = data.level ?? 1;
     this.score = data.score ?? 0;
     this.playerHP = data.hp ?? PLAYER_BASE_HP;
@@ -182,6 +186,7 @@ export class GameScene extends Phaser.Scene {
     this.armorPoints = data.armor ?? 0;
     this.laserStep = data.laserStep ?? 0;
     this.laserParts = data.laserParts ?? 0;
+    this.partTakenAt = data.partTakenAt ?? 0;
     this.dualCount = 0;
     this.rearCount = 0;
     this.shieldActive = false;
@@ -246,7 +251,9 @@ export class GameScene extends Phaser.Scene {
     this.scheduleNextPickup();
     // Parts only drop while there is a rung left to climb at this level. That
     // gate is what stops a good run from chaining two colours back to back.
-    if (this.laserStep < maxLaserStep(this.level)) {
+    // Taking one also spends it for the level: dying and replaying the level
+    // would otherwise hand out a second copy of a part already collected.
+    if (this.laserStep < maxLaserStep(this.level) && this.partTakenAt !== this.level) {
       this.spawnLaserPart();
     }
     this.startCountdown();
@@ -500,6 +507,17 @@ export class GameScene extends Phaser.Scene {
     this.keyD = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D);
     this.spaceKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.escKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+    this.pad = new Pad(this);
+
+    // Inside an itch.io iframe the arrows and space scroll the host page
+    // unless the game claims them outright.
+    this.input.keyboard!.addCapture([
+      Phaser.Input.Keyboard.KeyCodes.SPACE,
+      Phaser.Input.Keyboard.KeyCodes.UP,
+      Phaser.Input.Keyboard.KeyCodes.DOWN,
+      Phaser.Input.Keyboard.KeyCodes.LEFT,
+      Phaser.Input.Keyboard.KeyCodes.RIGHT,
+    ]);
   }
 
   // ─── CAMERAS & LAYOUT ────────────────────────────────────────────
@@ -915,7 +933,9 @@ export class GameScene extends Phaser.Scene {
   // ─── UPDATE LOOP ───────────────────────────────────────────────────────────
 
   update(time: number, delta: number): void {
-    if (!this.isDead && !this.transitioning && !this.countingDown && Phaser.Input.Keyboard.JustDown(this.escKey)) {
+    const padPause = this.pad.startJustPressed();
+    if (!this.isDead && !this.transitioning && !this.countingDown &&
+        (Phaser.Input.Keyboard.JustDown(this.escKey) || padPause)) {
       if (this.paused) this.resumeGame();
       else this.pauseGame();
     }
@@ -979,11 +999,14 @@ export class GameScene extends Phaser.Scene {
   // ─── MOVEMENT ──────────────────────────────────────────────────────────────
 
   private movePlayer(): void {
+    // Three input sources, all live at once: whichever the player reaches for
+    // works, with no mode to pick first.
     const stick = this.touch?.direction ?? null;
-    const left  = stick === 'left'  || this.cursors.left.isDown  || this.keyA.isDown;
-    const right = stick === 'right' || this.cursors.right.isDown || this.keyD.isDown;
-    const up    = stick === 'up'    || this.cursors.up.isDown    || this.keyW.isDown;
-    const down  = stick === 'down'  || this.cursors.down.isDown  || this.keyS.isDown;
+    const gp = this.pad.direction;
+    const left  = stick === 'left'  || gp === 'left'  || this.cursors.left.isDown  || this.keyA.isDown;
+    const right = stick === 'right' || gp === 'right' || this.cursors.right.isDown || this.keyD.isDown;
+    const up    = stick === 'up'    || gp === 'up'    || this.cursors.up.isDown    || this.keyW.isDown;
+    const down  = stick === 'down'  || gp === 'down'  || this.cursors.down.isDown  || this.keyS.isDown;
 
     // Strictly 4-directional: horizontal has priority
     if (left) {
@@ -1013,7 +1036,7 @@ export class GameScene extends Phaser.Scene {
     // tier 0: with an enemy crossing in front of you, waiting for the next
     // shot to come round on its own is a coin flip rather than a decision.
     if (this.overheated) return;
-    if (!this.spaceKey.isDown && !this.touch?.firing) return;
+    if (!this.spaceKey.isDown && !this.touch?.firing && !this.pad.firing) return;
     const rate = this.laser.rate;
     if (time - this.lastFired < rate) return;
     this.lastFired = time;
@@ -1360,6 +1383,7 @@ export class GameScene extends Phaser.Scene {
             armor: this.armorPoints,
             laserStep: this.laserStep,
             laserParts: this.laserParts,
+            partTakenAt: this.partTakenAt,
           });
         });
       }
@@ -1402,6 +1426,7 @@ export class GameScene extends Phaser.Scene {
         break;
       case 'laser-part':
         this.laserParts += 1;
+        this.partTakenAt = this.level;
         if (this.laserParts >= LASER_PARTS_NEEDED) {
           const before = this.laser;
           this.laserStep = Math.min(LASER_STEPS.length - 1, this.laserStep + 1);
@@ -1745,7 +1770,8 @@ export class GameScene extends Phaser.Scene {
     // One cooling rate whether or not the laser tripped. Overheating costs a
     // full bar, which is the whole of HEAT_COOL_MS; easing off at three
     // quarters costs three quarters of it.
-    const firing = !this.overheated && (this.spaceKey.isDown || !!this.touch?.firing);
+    const firing = !this.overheated &&
+      (this.spaceKey.isDown || !!this.touch?.firing || this.pad.firing);
     if (!firing && this.heat > 0) {
       this.heat = Math.max(0, this.heat - (HEAT_MAX * delta) / HEAT_COOL_MS);
       if (this.overheated && this.heat === 0) this.overheated = false;
@@ -2010,6 +2036,7 @@ export class GameScene extends Phaser.Scene {
         armor: this.armorPoints,
         laserStep: this.laserStep,
         laserParts: this.laserParts,
+        partTakenAt: this.partTakenAt,
       });
     });
   }

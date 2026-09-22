@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { TILE_SIZE, LASER_COLORS } from '../config/constants';
+import { getVolume } from '../systems/Settings';
 
 // All asset keys that can be loaded from files in public/assets/
 const FILE_ASSETS = [
@@ -33,6 +34,10 @@ export class BootScene extends Phaser.Scene {
   }
 
   create(): void {
+    // The sound manager is game-wide, so one call here carries the player's
+    // volume across every scene and every track.
+    this.sound.volume = getVolume();
+
     // Generate programmatic fallback for every missing asset
     if (this.needs('wall'))         this.makeWall();
     if (this.needs('player'))       this.makePlayer();
