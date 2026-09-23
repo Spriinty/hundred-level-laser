@@ -29,6 +29,14 @@ import { playMusic, applyMusicVolume, refreshMusic } from '../systems/Music';
 import { Thruster, PLAYER_THRUSTER, BOSS_THRUSTER, ENEMY_THRUSTERS, type ThrusterStyle } from '../systems/Thruster';
 import { UI_FONT } from '../config/fonts';
 
+/** One stop on the pause menu's cursor. Mirrors UiScene's FocusItem. */
+interface PauseItem {
+  target: Phaser.GameObjects.Text;
+  onSelect: () => void;
+  onLeft?: () => void;
+  onRight?: () => void;
+}
+
 type PickupType = 'life' | 'extra-life' | 'dual' | 'rear' | 'shield' | 'bomb' | 'armor' | 'laser-part';
 const PICKUP_TYPES: PickupType[] = ['life', 'extra-life', 'dual', 'rear', 'shield', 'bomb', 'armor'];
 
@@ -126,6 +134,9 @@ export class GameScene extends Phaser.Scene {
   private isDead = false;
   private paused = false;
   private pauseOverlayGroup: Phaser.GameObjects.GameObject[] = [];
+  private pauseItems: PauseItem[] = [];
+  /** Survives the rebuild, so changing a volume leaves the cursor in place. */
+  private pauseIndex = 0;
   private countingDown = false;
 
   // Player spawn position (to respawn on same level)
@@ -210,6 +221,8 @@ export class GameScene extends Phaser.Scene {
     this.isDead = false;
     this.paused = false;
     this.pauseOverlayGroup = [];
+    this.pauseItems = [];
+    this.pauseIndex = 0;
     this.countingDown = false;
     this.floorTiles = [];
     this.grid = [];
@@ -955,7 +968,11 @@ export class GameScene extends Phaser.Scene {
     // than hanging lit in mid-air through a pause or a death.
     this.updateThrusters();
 
-    if (this.isDead || this.transitioning || this.paused || this.countingDown) return;
+    if (this.paused) {
+      this.updatePauseMenu();
+      return;
+    }
+    if (this.isDead || this.transitioning || this.countingDown) return;
 
     this.movePlayer();
     this.manualShoot(time);
@@ -2011,23 +2028,35 @@ export class GameScene extends Phaser.Scene {
       this.scene.start('Menu');
     });
 
-    const hint = this.addUI(this.add.text(cx, cy + sp(L, 185), 'ÉCHAP pour reprendre', {
+    const hintText = this.pad.connected
+      ? 'Croix pour naviguer · A pour valider · START pour reprendre'
+      : 'Flèches pour naviguer · ESPACE pour valider · ÉCHAP pour reprendre';
+    const hint = this.addUI(this.add.text(cx, cy + sp(L, 185), hintText, {
       fontFamily: UI_FONT, fontSize: fs(L, 14), color: '#445566',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(501));
 
+    const music = this.pauseVolumeRow(cx, cy + sp(L, 115), 'MUSIQUE', getMusicVolume(), v => {
+      setMusicVolume(v);
+      applyMusicVolume();
+      // Crossing zero either starts the track or stops fetching it at all.
+      refreshMusic(this);
+    });
+    const sfx = this.pauseVolumeRow(cx, cy + sp(L, 148), 'SONS', getSfxVolume(), v => {
+      setSfxVolume(v);
+      playSfx(this, 'pickup');
+    });
+
     this.pauseOverlayGroup = [
-      overlay, title, resumeBtn, menuBtn, hint,
-      ...this.pauseVolumeRow(cx, cy + sp(L, 115), 'MUSIQUE', getMusicVolume(), v => {
-        setMusicVolume(v);
-        applyMusicVolume();
-        // Crossing zero either starts the track or stops fetching it at all.
-        refreshMusic(this);
-      }),
-      ...this.pauseVolumeRow(cx, cy + sp(L, 148), 'SONS', getSfxVolume(), v => {
-        setSfxVolume(v);
-        playSfx(this, 'pickup');
-      }),
+      overlay, title, resumeBtn, menuBtn, hint, ...music.texts, ...sfx.texts,
     ];
+
+    this.pauseItems = [
+      { target: resumeBtn, onSelect: () => this.resumeGame() },
+      { target: menuBtn, onSelect: () => { this.time.paused = false; this.scene.start('Menu'); } },
+      music.item,
+      sfx.item,
+    ];
+    this.showPauseCursor();
   }
 
   /**
@@ -2041,7 +2070,7 @@ export class GameScene extends Phaser.Scene {
    */
   private pauseVolumeRow(
     cx: number, y: number, label: string, value: number, apply: (v: number) => void
-  ): Phaser.GameObjects.Text[] {
+  ): { texts: Phaser.GameObjects.Text[]; item: PauseItem } {
     const L = this.layout;
     const style = (color: string, size: number) => ({
       fontFamily: UI_FONT, fontSize: fs(L, size), color,
@@ -2080,14 +2109,82 @@ export class GameScene extends Phaser.Scene {
       btn.on('pointerout', () => btn.setStyle({ color: '#ffcc44' }));
       btn.on('pointerdown', () => {
         apply(Math.min(1, Math.max(0, value + delta)));
-        // Cheapest way to re-render: the overlay is rebuilt on resize anyway.
-        this.pauseOverlayGroup.forEach(o => o.destroy());
-        this.pauseOverlayGroup = [];
-        this.buildPauseOverlay();
+        this.rebuildPauseOverlay();
       });
     }
 
-    return [name, left, barText, right, pct];
+    const step = (delta: number) => {
+      apply(Math.min(1, Math.max(0, value + delta)));
+      this.rebuildPauseOverlay();
+    };
+
+    return {
+      texts: [name, left, barText, right, pct],
+      // The label anchors the cursor: it is the leftmost part of the row, so
+      // the marker never lands on an arrow.
+      item: { target: name, onSelect: () => step(0.1), onLeft: () => step(-0.1), onRight: () => step(0.1) },
+    };
+  }
+
+  private rebuildPauseOverlay(): void {
+    this.pauseOverlayGroup.forEach(o => o.destroy());
+    this.pauseOverlayGroup = [];
+    this.buildPauseOverlay();
+  }
+
+  private showPauseCursor(): void {
+    const L = this.layout;
+    this.pauseIndex = Phaser.Math.Clamp(this.pauseIndex, 0, this.pauseItems.length - 1);
+    const target = this.pauseItems[this.pauseIndex].target;
+
+    // Placed from the measured left edge, whatever origin the target carries.
+    const left = target.x - target.displayWidth * target.originX;
+    const marker = this.addUI(
+      this.add.text(left - sp(L, 16), target.y, '▶', {
+        fontFamily: UI_FONT, fontSize: fs(L, 20), color: '#ffcc44',
+      }).setOrigin(1, 0.5).setScrollFactor(0).setDepth(501)
+    );
+    this.tweens.add({
+      targets: marker, alpha: 0.35, duration: 600, yoyo: true, repeat: -1, ease: 'Sine.inOut',
+    });
+    this.pauseOverlayGroup.push(marker);
+  }
+
+  /**
+   * The pause menu's own input. The scene keeps updating while paused — only
+   * physics and timers are stopped — so this runs in place of the game's
+   * controls rather than alongside them.
+   *
+   * Start is left alone: it closes the pause menu, so it cannot also confirm.
+   */
+  private updatePauseMenu(): void {
+    const move = (delta: number) => {
+      const count = this.pauseItems.length;
+      this.pauseIndex = (this.pauseIndex + delta + count) % count;
+      this.rebuildPauseOverlay();
+    };
+    const nudge = (delta: number) => {
+      const item = this.pauseItems[this.pauseIndex];
+      const handler = delta < 0 ? item?.onLeft : item?.onRight;
+      if (handler) handler();
+      else move(delta);
+    };
+
+    const kb = Phaser.Input.Keyboard;
+    if (kb.JustDown(this.cursors.up) || kb.JustDown(this.keyW) || kb.JustDown(this.keyZ)) move(-1);
+    else if (kb.JustDown(this.cursors.down) || kb.JustDown(this.keyS)) move(1);
+    else if (kb.JustDown(this.cursors.left) || kb.JustDown(this.keyA) || kb.JustDown(this.keyQ)) nudge(-1);
+    else if (kb.JustDown(this.cursors.right) || kb.JustDown(this.keyD)) nudge(1);
+    else if (kb.JustDown(this.spaceKey)) this.pauseItems[this.pauseIndex]?.onSelect();
+    else if (this.pad.aJustPressed()) this.pauseItems[this.pauseIndex]?.onSelect();
+    else {
+      switch (this.pad.directionJustPressed()) {
+        case 'up': move(-1); break;
+        case 'down': move(1); break;
+        case 'left': nudge(-1); break;
+        case 'right': nudge(1); break;
+      }
+    }
   }
 
   private resumeGame(): void {

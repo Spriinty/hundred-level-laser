@@ -60,12 +60,30 @@ export function isMusicOn(): boolean {
 const TEST_KEY = 'hll-test';
 
 /**
+ * Whether test mode can be reached at all.
+ *
+ * It exists for tuning, not for playing: a level selector on a public build
+ * hands every visitor a way past the game. It stays available while running
+ * from the dev server, and behind `?test` in a URL for checking a real build.
+ */
+export function isTestModeAvailable(): boolean {
+  if (import.meta.env.DEV) return true;
+  try {
+    return new URLSearchParams(location.search).has('test');
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Test mode puts a level and laser selector in the corner of the play area,
- * so a given level can be reached without playing the ninety before it. Off
- * unless deliberately switched on from the menu.
+ * so a given level can be reached without playing the ninety before it.
+ *
+ * Gated on availability as well as the stored setting, so a build that hides
+ * the option never honours a flag left behind in someone's browser.
  */
 export function isTestMode(): boolean {
-  return localStorage.getItem(TEST_KEY) === 'on';
+  return isTestModeAvailable() && localStorage.getItem(TEST_KEY) === 'on';
 }
 
 export function setTestMode(on: boolean): void {

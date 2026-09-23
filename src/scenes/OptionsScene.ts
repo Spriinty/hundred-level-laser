@@ -2,7 +2,7 @@ import {
   getMusicVolume, setMusicVolume,
   getSfxVolume, setSfxVolume,
   getStickSide, setStickSide,
-  isTestMode, setTestMode,
+  isTestMode, setTestMode, isTestModeAvailable,
 } from '../systems/Settings';
 import { isTouchDevice } from '../systems/TouchControls';
 import { applyMusicVolume, refreshMusic } from '../systems/Music';
@@ -51,7 +51,8 @@ export class OptionsScene extends UiScene {
     const rows: OptionRow[] = [this.musicRow(), this.sfxRow(), this.fullscreenRow()];
     // Handedness only means something where there is a thumb to favour.
     if (isTouchDevice()) rows.push(this.stickRow());
-    rows.push(this.testRow());
+    // Hidden on a public build: a level selector there is a way past the game.
+    if (isTestModeAvailable()) rows.push(this.testRow());
     return rows;
   }
 
