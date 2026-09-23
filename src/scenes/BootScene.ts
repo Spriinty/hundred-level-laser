@@ -3,6 +3,9 @@ import { TILE_SIZE, LASER_COLORS } from '../config/constants';
 import { preloadSfx } from '../systems/Sfx';
 import { UI_FONT } from '../config/fonts';
 
+/** How long the boot screen will wait on the web font before giving up. */
+const FONT_WAIT_MS = 2000;
+
 // All asset keys that can be loaded from files in public/assets/
 const FILE_ASSETS = [
   'player',
@@ -66,11 +69,30 @@ export class BootScene extends Phaser.Scene {
     this.makeFlame();
     this.makeGlow();
 
-    // The web font is requested by the page, not by Phaser, and text laid out
-    // before it arrives is measured against the fallback and has to be redrawn.
-    // Holding the menu until the font is ready avoids that flash of the wrong
-    // face — and if it never loads, the promise still settles.
-    document.fonts.ready.then(() => this.scene.start('Menu'));
+    this.startWhenFontSettles();
+  }
+
+  /**
+   * Wait for the web font, but never on it.
+   *
+   * Text laid out before the font arrives is measured against the fallback and
+   * looks wrong until something redraws it, so it is worth a short wait. It is
+   * not worth the game: `document.fonts.ready` only settles once the browser
+   * has resolved every pending font request, and a blocked stylesheet — Brave
+   * blocks Google Fonts by default, and so do plenty of extensions — can leave
+   * it pending for good. Gating the menu on it turned a cosmetic problem into
+   * a black screen with nothing in the console.
+   */
+  private startWhenFontSettles(): void {
+    let started = false;
+    const go = () => {
+      if (started) return;
+      started = true;
+      this.scene.start('Menu');
+    };
+
+    this.time.delayedCall(FONT_WAIT_MS, go);
+    document.fonts?.ready.then(go).catch(go);
   }
 
   /**
