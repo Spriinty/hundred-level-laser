@@ -64,7 +64,7 @@ export abstract class UiScene extends Phaser.Scene {
     // on shutdown, but the scene instance is reused, so a flag saying "already
     // bound" would leave a revisited screen deaf.
     this.bindMenuKeys();
-    this.acceptFrom = this.time.now + SETTLE_MS;
+    this.acceptFrom = performance.now() + SETTLE_MS;
     this.drawn = [];
     this.redraw();
     this.scale.on('resize', this.redraw, this);
@@ -132,9 +132,16 @@ export abstract class UiScene extends Phaser.Scene {
   }
 
   /** Bound once for the scene's life, not once per draw pass. */
-  /** Whether the screen has been open long enough to act on an input. */
+  /**
+   * Whether the screen has been open long enough to act on an input.
+   *
+   * Measured against `performance.now()` rather than the scene clock: Phaser
+   * reuses a scene instance, and its clock keeps the time it held when the
+   * scene last closed. A window opened against that stale reading is already
+   * in the past, so it never held anything back.
+   */
   private accepts(): boolean {
-    return this.time.now >= this.acceptFrom;
+    return performance.now() >= this.acceptFrom;
   }
 
   private bindMenuKeys(): void {

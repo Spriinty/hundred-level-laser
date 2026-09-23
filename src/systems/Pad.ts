@@ -13,6 +13,20 @@ function down(v: number | boolean): boolean {
 }
 
 /**
+ * Held state per button, shared by every Pad in the game rather than held per
+ * instance.
+ *
+ * There is one physical controller, so there is one answer to "was this button
+ * already down". A scene builds its own Pad, and per-instance memory meant a
+ * fresh one started out believing nothing was pressed: a button still held
+ * through a scene change read as a brand new press, fired again, changed scene
+ * again, and ran away with itself. A hundred-millisecond press was enough to
+ * cross several screens.
+ */
+const wasDown = new Map<string, boolean>();
+let dirWasDown: Direction = null;
+
+/**
  * An Xbox-style gamepad, read the same way as the touch stick: a direction
  * and a trigger, never a vector, because the ship only ever moves four ways.
  *
@@ -22,17 +36,10 @@ function down(v: number | boolean): boolean {
  * concerned until the player touches it — so there is nothing to cache.
  */
 export class Pad {
-  /**
-   * Previous held state per button, so each one keeps its own edge. Sharing a
-   * single flag meant whichever button was polled second missed its press.
-   */
-  private wasDown = new Map<string, boolean>();
-  private dirWasDown: Direction = null;
-
   /** True on the frame a button goes down, and not while it is held. */
   private edge(name: string, held: boolean): boolean {
-    const fired = held && !(this.wasDown.get(name) ?? false);
-    this.wasDown.set(name, held);
+    const fired = held && !(wasDown.get(name) ?? false);
+    wasDown.set(name, held);
     return fired;
   }
 
@@ -96,8 +103,8 @@ export class Pad {
    */
   directionJustPressed(): Direction {
     const now = this.direction;
-    const fired = now !== null && now !== this.dirWasDown ? now : null;
-    this.dirWasDown = now;
+    const fired = now !== null && now !== dirWasDown ? now : null;
+    dirWasDown = now;
     return fired;
   }
 
