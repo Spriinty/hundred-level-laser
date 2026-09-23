@@ -7,7 +7,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "build:itch": "tsc && vite build --mode itch",
-    "zip:itch": "powershell -NoProfile -Command \"Compress-Archive -Path dist-itch/* -DestinationPath hundred-level-laser-itch.zip -Force\""
+    "zip:itch": "node scripts/zip-itch.mjs"
   },
   "devDependencies": {
     "typescript": "^5.4.0",
