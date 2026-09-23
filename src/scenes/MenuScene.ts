@@ -96,7 +96,7 @@ export class MenuScene extends UiScene {
         'Bouton rouge pour tirer\n' +
         'Tuer tous les ennemis du niveau pour avancer\n' +
         '❚❚ en haut à gauche  Pause'
-      : 'WASD / ↑↓←→  Déplacements\n' +
+      : 'WASD / ZQSD / ↑↓←→  Déplacements\n' +
         'ESPACE  Tirer dans la direction du vaisseau\n' +
         'Tuer tous les ennemis du niveau pour avancer\n' +
         'ÉCHAP  Pause';

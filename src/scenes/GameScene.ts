@@ -95,6 +95,11 @@ export class GameScene extends Phaser.Scene {
   private keyA!: Phaser.Input.Keyboard.Key;
   private keyS!: Phaser.Input.Keyboard.Key;
   private keyD!: Phaser.Input.Keyboard.Key;
+  // AZERTY puts Z and Q where QWERTY has W and A, and the browser reports
+  // the letter produced rather than the physical key. Without these two, a
+  // French keyboard can go down and right but neither up nor left.
+  private keyZ!: Phaser.Input.Keyboard.Key;
+  private keyQ!: Phaser.Input.Keyboard.Key;
   private spaceKey!: Phaser.Input.Keyboard.Key;
   private escKey!: Phaser.Input.Keyboard.Key;
   private pad!: Pad;
@@ -510,6 +515,8 @@ export class GameScene extends Phaser.Scene {
     this.keyA = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A);
     this.keyS = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this.keyD = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D);
+    this.keyZ = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.Z);
+    this.keyQ = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
     this.spaceKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.escKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.pad = new Pad(this);
@@ -1008,9 +1015,9 @@ export class GameScene extends Phaser.Scene {
     // works, with no mode to pick first.
     const stick = this.touch?.direction ?? null;
     const gp = this.pad.direction;
-    const left  = stick === 'left'  || gp === 'left'  || this.cursors.left.isDown  || this.keyA.isDown;
+    const left  = stick === 'left'  || gp === 'left'  || this.cursors.left.isDown  || this.keyA.isDown || this.keyQ.isDown;
     const right = stick === 'right' || gp === 'right' || this.cursors.right.isDown || this.keyD.isDown;
-    const up    = stick === 'up'    || gp === 'up'    || this.cursors.up.isDown    || this.keyW.isDown;
+    const up    = stick === 'up'    || gp === 'up'    || this.cursors.up.isDown    || this.keyW.isDown || this.keyZ.isDown;
     const down  = stick === 'down'  || gp === 'down'  || this.cursors.down.isDown  || this.keyS.isDown;
 
     // Strictly 4-directional: horizontal has priority
