@@ -1,7 +1,19 @@
 import Phaser from 'phaser';
 import { computeLayout, fs, sp, type Layout } from '../systems/Layout';
 import { playMusic } from '../systems/Music';
+import { Pad } from '../systems/Pad';
 import { UI_FONT } from '../config/fonts';
+
+/**
+ * One entry in a screen's navigation order. `onLeft`/`onRight` are for rows
+ * that hold a value rather than an action, like the volume bars.
+ */
+export interface FocusItem {
+  target: Phaser.GameObjects.Text;
+  onSelect: () => void;
+  onLeft?: () => void;
+  onRight?: () => void;
+}
 
 /**
  * Base class for the full-screen menu scenes (menu, game over, victory,
@@ -15,7 +27,16 @@ import { UI_FONT } from '../config/fonts';
  */
 export abstract class UiScene extends Phaser.Scene {
   protected layout!: Layout;
+  protected pad!: Pad;
   private drawn: Phaser.GameObjects.GameObject[] = [];
+
+  /**
+   * Rebuilt by every draw pass, since the objects it points at are. The index
+   * outlives it, so changing a setting leaves the cursor where it was.
+   */
+  private focusItems: FocusItem[] = [];
+  private focusIndex = 0;
+  private keysBound = false;
 
   /** Draw the scene against `this.layout`. Called on create and on resize. */
   protected abstract draw(): void;
@@ -25,6 +46,8 @@ export abstract class UiScene extends Phaser.Scene {
     // Every menu screen shares one track, so walking between them — menu,
     // leaderboard, game over — never breaks the music.
     playMusic(this, 'menu');
+    this.pad = new Pad(this);
+    this.bindMenuKeys();
     this.drawn = [];
     this.redraw();
     this.scale.on('resize', this.redraw, this);
@@ -32,11 +55,99 @@ export abstract class UiScene extends Phaser.Scene {
   }
 
   protected redraw(): void {
+    this.focusItems = [];
     this.tweens.killAll();
     this.drawn.forEach(o => o.destroy());
     this.drawn = [];
     this.layout = computeLayout(this.scale.width, this.scale.height);
     this.draw();
+  }
+
+  // ─── FOCUS ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Add an entry to the navigation order. Called from `draw()`, in the order
+   * the entries should be walked; a screen that registers none simply has no
+   * keyboard or pad navigation, which is what the name-entry screens want
+   * until the name is in.
+   */
+  protected focus(item: FocusItem): void {
+    this.focusItems.push(item);
+  }
+
+  /** Call at the end of `draw()`, once every entry is registered. */
+  protected showFocus(): void {
+    if (this.focusItems.length === 0) return;
+    this.focusIndex = Phaser.Math.Clamp(this.focusIndex, 0, this.focusItems.length - 1);
+
+    const target = this.focusItems[this.focusIndex].target;
+    // The left edge, whatever origin the target was given.
+    const left = target.x - target.displayWidth * target.originX;
+    const marker = this.own(
+      this.add.text(left - this.sp(16), target.y, '▶', this.mono(20, '#ffcc44')).setOrigin(1, 0.5)
+    );
+    this.tweens.add({
+      targets: marker, alpha: 0.35, duration: 600, yoyo: true, repeat: -1, ease: 'Sine.inOut',
+    });
+  }
+
+  private moveFocus(delta: number): void {
+    const count = this.focusItems.length;
+    if (count === 0) return;
+    this.focusIndex = (this.focusIndex + delta + count) % count;
+    this.redraw();
+  }
+
+  private nudgeFocus(delta: number): void {
+    const item = this.focusItems[this.focusIndex];
+    if (!item) return;
+
+    const handler = delta < 0 ? item.onLeft : item.onRight;
+    // An entry holding no value lets left and right walk the list instead,
+    // which is what a row of side-by-side buttons wants.
+    if (handler) handler();
+    else this.moveFocus(delta);
+  }
+
+  private activateFocus(): void {
+    this.focusItems[this.focusIndex]?.onSelect();
+  }
+
+  /** Bound once for the scene's life, not once per draw pass. */
+  private bindMenuKeys(): void {
+    if (this.keysBound) return;
+    this.keysBound = true;
+
+    this.input.keyboard?.on('keydown', (e: KeyboardEvent) => {
+      // A screen with nothing registered leaves the keys to whoever else
+      // wants them — the name entry, for one.
+      if (this.focusItems.length === 0) return;
+
+      switch (e.key) {
+        case 'ArrowUp': this.moveFocus(-1); break;
+        case 'ArrowDown': this.moveFocus(1); break;
+        case 'ArrowLeft': this.nudgeFocus(-1); break;
+        case 'ArrowRight': this.nudgeFocus(1); break;
+        case 'Enter': case ' ': this.activateFocus(); break;
+        default: return;
+      }
+      e.preventDefault();
+    });
+  }
+
+  update(): void {
+    if (!this.pad || this.focusItems.length === 0) return;
+
+    if (this.pad.confirmJustPressed()) {
+      this.activateFocus();
+      return;
+    }
+    switch (this.pad.directionJustPressed()) {
+      case 'up': this.moveFocus(-1); break;
+      case 'down': this.moveFocus(1); break;
+      case 'left': this.nudgeFocus(-1); break;
+      case 'right': this.nudgeFocus(1); break;
+    }
   }
 
   /** Register an object so the next redraw disposes of it. */

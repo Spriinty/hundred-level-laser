@@ -106,13 +106,24 @@ export class OptionsScene extends UiScene {
       x += arrowW + gap;
 
       suffixes[i]?.setPosition(x, y);
+
+      // The label is the anchor: it is the leftmost part of the row, so the
+      // cursor sits clear of the arrows rather than on top of one.
+      this.focus({
+        target: labels[i],
+        onSelect: rows[i].onRight,
+        onLeft: rows[i].onLeft,
+        onRight: rows[i].onRight,
+      });
     });
 
-    this.button(
+    const back = this.button(
       cx, top + rows.length * spacing + height * 0.06,
       '[ RETOUR ]', 26, '#00ff88', '#88ffcc',
       () => this.scene.start('Menu')
     );
+    this.focus({ target: back, onSelect: () => this.scene.start('Menu') });
+    this.showFocus();
   }
 
   /** Ten cells and a percentage, the same widget for both levels. */

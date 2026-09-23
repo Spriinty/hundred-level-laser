@@ -1,6 +1,5 @@
 import { isTouchDevice } from '../systems/TouchControls';
 import { prefetchMusic } from '../systems/Music';
-import { Pad } from '../systems/Pad';
 import { UiScene } from './UiScene';
 
 const PAD_CONTROLS =
@@ -14,11 +13,9 @@ export class MenuScene extends UiScene {
     super({ key: 'Menu' });
   }
 
-  private pad!: Pad;
   private padWasConnected = false;
 
   create(): void {
-    this.pad = new Pad(this);
     this.startResponsive();
     // The menu is where the player lingers, so it is the cheapest place to
     // pull the game theme down before a run needs it.
@@ -32,9 +29,9 @@ export class MenuScene extends UiScene {
       this.padWasConnected = this.pad.connected;
       this.redraw();
     }
-    if (this.pad.confirmJustPressed()) {
-      this.scene.start('Game', { level: 1, score: 0, hp: 3 });
-    }
+    // A now activates whatever the cursor is on, rather than always starting
+    // a run — otherwise the pad could never reach the options.
+    super.update();
   }
 
   protected draw(): void {
@@ -74,15 +71,20 @@ export class MenuScene extends UiScene {
       { stroke: '#004422', strokeThickness: 4 }
     );
 
-    this.button(
+    const scoresBtn = this.button(
       cx, height * 0.681, '[ MEILLEURS SCORES ]', 22, '#ffcc44', '#ffee88',
       () => this.scene.start('Leaderboard')
     );
 
-    this.button(
+    const optionsBtn = this.button(
       cx, height * 0.752, '[ OPTIONS ]', 22, '#88aaff', '#ccddff',
       () => this.scene.start('Options')
     );
+
+    this.focus({ target: btn, onSelect: () => this.scene.start('Game', { level: 1, score: 0, hp: 3 }) });
+    this.focus({ target: scoresBtn, onSelect: () => this.scene.start('Leaderboard') });
+    this.focus({ target: optionsBtn, onSelect: () => this.scene.start('Options') });
+    this.showFocus();
 
     const touch = isTouchDevice();
 

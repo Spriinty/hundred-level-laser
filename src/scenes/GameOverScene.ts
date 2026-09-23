@@ -1,7 +1,6 @@
 import { NameInput } from '../systems/NameInput';
 import { saveScore } from '../systems/Scores';
 import { isTouchDevice } from '../systems/TouchControls';
-import { Pad } from '../systems/Pad';
 import { wheelUp, wheelDown, wheelForward, wheelBack } from '../systems/NameWheel';
 import { UiScene } from './UiScene';
 
@@ -16,7 +15,6 @@ export class GameOverScene extends UiScene {
   private nameText!: Phaser.GameObjects.Text;
   private cursorVisible = true;
   private nameInput?: NameInput;
-  private pad!: Pad;
 
   constructor() {
     super({ key: 'GameOver' });
@@ -30,7 +28,6 @@ export class GameOverScene extends UiScene {
     this.rank = -1;
     this.cursorVisible = true;
     this.nameInput = undefined;
-    this.pad = new Pad(this);
 
     // Blinking cursor
     this.time.addEvent({
@@ -85,13 +82,26 @@ export class GameOverScene extends UiScene {
   update(): void {
     if (this.submitted) return;
 
-    if (this.pad.confirmJustPressed()) {
+    // A accepts the letter and opens the next slot, which is the reflex a
+    // controller teaches; Start commits the whole name. Putting the commit on
+    // A saved a one-letter score the moment anyone pressed it out of habit.
+    if (this.pad.startJustPressed()) {
       this.trySubmit();
       return;
     }
+    if (this.pad.aJustPressed()) {
+      // Nowhere left to go: the last slot accepts, so the run still ends on A.
+      if (this.nameEntry.length >= MAX_NAME) this.trySubmit();
+      else this.nameEntry = wheelForward(this.nameEntry, MAX_NAME);
+      this.refreshNameText();
+      return;
+    }
+    if (this.pad.bJustPressed()) {
+      this.nameEntry = wheelBack(this.nameEntry);
+      this.refreshNameText();
+      return;
+    }
 
-    // Wind the last character, step between slots. The same ring the arrow
-    // keys drive, so the two controls never disagree about what is selected.
     switch (this.pad.directionJustPressed()) {
       case 'down':  this.nameEntry = wheelDown(this.nameEntry, MAX_NAME); break;
       case 'up':    this.nameEntry = wheelUp(this.nameEntry, MAX_NAME); break;
@@ -164,7 +174,7 @@ export class GameOverScene extends UiScene {
     } else {
       this.own(
         this.add.text(cx, height * 0.597, this.pad.connected
-          ? 'HAUT/BAS lettre · DROITE slot suivant · GAUCHE effacer · A valider'
+          ? 'HAUT/BAS lettre · A lettre suivante · B effacer · START enregistrer'
           : 'A-Z · 0-9 · FLÈCHES · BACKSPACE · ENTRÉE pour valider',
           this.mono(15, '#445566', { align: 'center', wordWrap: { width: width * 0.9 } })
         ).setOrigin(0.5)

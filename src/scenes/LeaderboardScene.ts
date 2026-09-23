@@ -102,7 +102,7 @@ export class LeaderboardScene extends UiScene {
     const spread = portrait ? width * 0.24 : this.sp(150);
     const size = portrait ? 22 : 28;
 
-    this.button(
+    const menuBtn = this.button(
       cx - spread, btnY, '[ MENU ]', size, '#4488ff', '#88bbff',
       () => this.scene.start('Menu'),
       { stroke: '#001122', strokeThickness: 4 }
@@ -118,5 +118,12 @@ export class LeaderboardScene extends UiScene {
       targets: playBtn, scaleX: 1.04, scaleY: 1.04,
       duration: 700, yoyo: true, repeat: -1, ease: 'Sine.inOut',
     });
+
+    this.focus({ target: menuBtn, onSelect: () => this.scene.start('Menu') });
+    this.focus({
+      target: playBtn,
+      onSelect: () => this.scene.start('Game', { level: 1, score: 0, hp: 3 }),
+    });
+    this.showFocus();
   }
 }

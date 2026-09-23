@@ -22,9 +22,19 @@ function down(v: number | boolean): boolean {
  * concerned until the player touches it — so there is nothing to cache.
  */
 export class Pad {
-  private startWasDown = false;
-  private confirmWasDown = false;
+  /**
+   * Previous held state per button, so each one keeps its own edge. Sharing a
+   * single flag meant whichever button was polled second missed its press.
+   */
+  private wasDown = new Map<string, boolean>();
   private dirWasDown: Direction = null;
+
+  /** True on the frame a button goes down, and not while it is held. */
+  private edge(name: string, held: boolean): boolean {
+    const fired = held && !(this.wasDown.get(name) ?? false);
+    this.wasDown.set(name, held);
+    return fired;
+  }
 
   constructor(private scene: Phaser.Scene) {}
 
@@ -65,15 +75,19 @@ export class Pad {
     return down(p.A) || down(p.R1) || down(p.R2);
   }
 
-  /**
-   * Start, edge-triggered. Held down, it would toggle the pause menu on every
-   * frame it is read.
-   */
+  /** Start, edge-triggered: held, it would toggle pause on every frame. */
   startJustPressed(): boolean {
-    const down = this.pad?.buttons[9]?.pressed ?? false;
-    const fired = down && !this.startWasDown;
-    this.startWasDown = down;
-    return fired;
+    return this.edge('start', this.pad?.buttons[9]?.pressed ?? false);
+  }
+
+  /** A on its own — accepting a choice and moving on, not committing. */
+  aJustPressed(): boolean {
+    return this.edge('a', down(this.pad?.A ?? false));
+  }
+
+  /** B on its own — going back a step. */
+  bJustPressed(): boolean {
+    return this.edge('b', down(this.pad?.B ?? false));
   }
 
   /**
@@ -87,12 +101,13 @@ export class Pad {
     return fired;
   }
 
-  /** A or Start, edge-triggered — for menus, where either should confirm. */
+  /**
+   * A or Start — for menus, where either should confirm. It carries its own
+   * edge rather than reading the two above, so a scene can poll this and them
+   * without one swallowing the other's press.
+   */
   confirmJustPressed(): boolean {
     const p = this.pad;
-    const held = down(p?.A ?? false) || (p?.buttons[9]?.pressed ?? false);
-    const fired = held && !this.confirmWasDown;
-    this.confirmWasDown = held;
-    return fired;
+    return this.edge('confirm', down(p?.A ?? false) || (p?.buttons[9]?.pressed ?? false));
   }
 }
