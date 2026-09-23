@@ -2031,7 +2031,7 @@ export class GameScene extends Phaser.Scene {
     const hintText = this.pad.connected
       ? 'Croix pour naviguer · A pour valider · START pour reprendre'
       : 'Flèches pour naviguer · ESPACE pour valider · ÉCHAP pour reprendre';
-    const hint = this.addUI(this.add.text(cx, cy + sp(L, 185), hintText, {
+    const hint = this.addUI(this.add.text(cx, cy + sp(L, 218), hintText, {
       fontFamily: UI_FONT, fontSize: fs(L, 14), color: '#445566',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(501));
 
@@ -2045,9 +2045,11 @@ export class GameScene extends Phaser.Scene {
       setSfxVolume(v);
       playSfx(this, 'pickup');
     });
+    const full = this.pauseFullscreenRow(cx, cy + sp(L, 181));
 
     this.pauseOverlayGroup = [
-      overlay, title, resumeBtn, menuBtn, hint, ...music.texts, ...sfx.texts,
+      overlay, title, resumeBtn, menuBtn, hint,
+      ...music.texts, ...sfx.texts, ...full.texts,
     ];
 
     this.pauseItems = [
@@ -2055,6 +2057,7 @@ export class GameScene extends Phaser.Scene {
       { target: menuBtn, onSelect: () => { this.time.paused = false; this.scene.start('Menu'); } },
       music.item,
       sfx.item,
+      full.item,
     ];
     this.showPauseCursor();
   }
@@ -2068,62 +2071,92 @@ export class GameScene extends Phaser.Scene {
    * Positions come from the text's measured width all the same, so the arrows
    * cannot land on the bar.
    */
-  private pauseVolumeRow(
-    cx: number, y: number, label: string, value: number, apply: (v: number) => void
+  /**
+   * One setting on the pause overlay: a label, a value flanked by arrows, and
+   * an optional suffix past the right one.
+   *
+   * Built here rather than borrowed from the options screen, which lives on a
+   * UiScene owning the whole canvas; this has to sit on the UI camera at the
+   * overlay's depth, over a game still on screen. Positions come from the
+   * measured widths all the same, so nothing can land on the bar.
+   */
+  private pauseRow(
+    cx: number, y: number, label: string, value: string, suffix: string,
+    onLeft: () => void, onRight: () => void
   ): { texts: Phaser.GameObjects.Text[]; item: PauseItem } {
     const L = this.layout;
-    const style = (color: string, size: number) => ({
-      fontFamily: UI_FONT, fontSize: fs(L, size), color,
-    });
-
-    const filled = Math.round(value * 10);
-    const bar = '▮'.repeat(filled) + '▯'.repeat(10 - filled);
-
-    const mk = (text: string, color: string, size: number, originX: number) =>
+    const mk = (text: string, color: string, originX: number) =>
       this.addUI(
-        this.add.text(0, y, text, style(color, size))
+        this.add.text(0, y, text, { fontFamily: UI_FONT, fontSize: fs(L, 16), color })
           .setOrigin(originX, 0.5).setScrollFactor(0).setDepth(501)
       );
 
-    const name = mk(label, '#88aaff', 16, 1);
-    const barText = mk(bar, '#cfe4ff', 16, 0.5);
-    const pct = mk(`${Math.round(value * 100)}%`, '#cfe4ff', 16, 0);
-    const left = mk('◀', '#ffcc44', 16, 0.5);
-    const right = mk('▶', '#ffcc44', 16, 0.5);
+    const name = mk(label, '#88aaff', 1);
+    const valueText = mk(value, '#cfe4ff', 0.5);
+    const left = mk('◀', '#ffcc44', 0.5);
+    const right = mk('▶', '#ffcc44', 0.5);
+    const suffixText = suffix ? mk(suffix, '#cfe4ff', 0) : null;
 
     const gap = sp(L, 14);
     const arrowW = left.displayWidth;
-    const barW = barText.displayWidth;
+    const valueW = valueText.displayWidth;
 
     // Laid out from the centre outwards, so the row stays centred whatever
     // the labels and the font turn out to measure.
-    barText.setX(cx);
-    left.setX(cx - barW / 2 - gap - arrowW / 2);
-    right.setX(cx + barW / 2 + gap + arrowW / 2);
+    valueText.setX(cx);
+    left.setX(cx - valueW / 2 - gap - arrowW / 2);
+    right.setX(cx + valueW / 2 + gap + arrowW / 2);
     name.setX(left.x - arrowW / 2 - gap);
-    pct.setX(right.x + arrowW / 2 + gap);
+    suffixText?.setX(right.x + arrowW / 2 + gap);
 
-    for (const [btn, delta] of [[left, -0.1], [right, 0.1]] as const) {
+    for (const [btn, act] of [[left, onLeft], [right, onRight]] as const) {
       btn.setInteractive({ useHandCursor: true });
       btn.on('pointerover', () => btn.setStyle({ color: '#ffee88' }));
       btn.on('pointerout', () => btn.setStyle({ color: '#ffcc44' }));
-      btn.on('pointerdown', () => {
-        apply(Math.min(1, Math.max(0, value + delta)));
-        this.rebuildPauseOverlay();
-      });
+      btn.on('pointerdown', act);
     }
 
+    const texts = [name, left, valueText, right];
+    if (suffixText) texts.push(suffixText);
+
+    return {
+      texts,
+      // The label anchors the cursor: it is the leftmost part of the row, so
+      // the marker never lands on an arrow.
+      item: { target: name, onSelect: onRight, onLeft, onRight },
+    };
+  }
+
+  private pauseVolumeRow(
+    cx: number, y: number, label: string, value: number, apply: (v: number) => void
+  ): { texts: Phaser.GameObjects.Text[]; item: PauseItem } {
+    const filled = Math.round(value * 10);
     const step = (delta: number) => {
       apply(Math.min(1, Math.max(0, value + delta)));
       this.rebuildPauseOverlay();
     };
 
-    return {
-      texts: [name, left, barText, right, pct],
-      // The label anchors the cursor: it is the leftmost part of the row, so
-      // the marker never lands on an arrow.
-      item: { target: name, onSelect: () => step(0.1), onLeft: () => step(-0.1), onRight: () => step(0.1) },
+    return this.pauseRow(
+      cx, y, label,
+      '▮'.repeat(filled) + '▯'.repeat(10 - filled),
+      `${Math.round(value * 100)}%`,
+      () => step(-0.1), () => step(0.1)
+    );
+  }
+
+  private pauseFullscreenRow(cx: number, y: number): { texts: Phaser.GameObjects.Text[]; item: PauseItem } {
+    const toggle = () => {
+      // Entering fullscreen needs a user gesture. A tap on an arrow is one; a
+      // gamepad poll is not, and the browser will simply refuse it there.
+      if (this.scale.isFullscreen) this.scale.stopFullscreen();
+      else this.scale.startFullscreen();
+      this.rebuildPauseOverlay();
     };
+
+    return this.pauseRow(
+      cx, y, 'PLEIN ÉCRAN', this.scale.isFullscreen ? 'OUI' : 'NON', '',
+      toggle, toggle
+    );
   }
 
   private rebuildPauseOverlay(): void {
