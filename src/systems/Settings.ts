@@ -14,33 +14,47 @@ export function setStickSide(side: StickSide): void {
   localStorage.setItem(STICK_KEY, side);
 }
 
-const VOLUME_KEY = 'hll-volume';
+const MUSIC_VOLUME_KEY = 'hll-volume';
+const SFX_VOLUME_KEY = 'hll-sfx-volume';
 const LEGACY_MUSIC_KEY = 'hll-music';
 
 /** Comfortable by default rather than full blast. */
-export const DEFAULT_VOLUME = 0.35;
+export const DEFAULT_MUSIC_VOLUME = 0.35;
+/** Effects sit above the music: they carry information, the music does not. */
+export const DEFAULT_SFX_VOLUME = 0.6;
 
-/**
- * Output volume, 0 to 1. Zero is the off switch, so there is no separate mute
- * setting to contradict it.
- */
-export function getVolume(): number {
-  const raw = localStorage.getItem(VOLUME_KEY);
-  if (raw === null) {
-    // Carry over the on/off toggle this replaced, for anyone who had set it.
-    return localStorage.getItem(LEGACY_MUSIC_KEY) === 'off' ? 0 : DEFAULT_VOLUME;
-  }
+function read(key: string, fallback: number): number {
+  const raw = localStorage.getItem(key);
+  if (raw === null) return fallback;
   const v = Number(raw);
-  return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : DEFAULT_VOLUME;
+  return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : fallback;
 }
 
-export function setVolume(v: number): void {
-  localStorage.setItem(VOLUME_KEY, String(Math.min(1, Math.max(0, v))));
+/**
+ * Music and effects carry their own level, 0 to 1. Zero is the off switch on
+ * either, so there is no separate mute setting to contradict them.
+ */
+export function getMusicVolume(): number {
+  // Carry over the on/off toggle this replaced, for anyone who had set it.
+  const legacyOff = localStorage.getItem(LEGACY_MUSIC_KEY) === 'off';
+  return read(MUSIC_VOLUME_KEY, legacyOff ? 0 : DEFAULT_MUSIC_VOLUME);
+}
+
+export function setMusicVolume(v: number): void {
+  localStorage.setItem(MUSIC_VOLUME_KEY, String(Math.min(1, Math.max(0, v))));
+}
+
+export function getSfxVolume(): number {
+  return read(SFX_VOLUME_KEY, DEFAULT_SFX_VOLUME);
+}
+
+export function setSfxVolume(v: number): void {
+  localStorage.setItem(SFX_VOLUME_KEY, String(Math.min(1, Math.max(0, v))));
 }
 
 /** Whether there is any point fetching the music at all. */
 export function isMusicOn(): boolean {
-  return getVolume() > 0;
+  return getMusicVolume() > 0;
 }
 
 const TEST_KEY = 'hll-test';

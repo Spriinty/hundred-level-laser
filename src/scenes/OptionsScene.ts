@@ -1,10 +1,12 @@
 import {
-  getVolume, setVolume,
+  getMusicVolume, setMusicVolume,
+  getSfxVolume, setSfxVolume,
   getStickSide, setStickSide,
   isTestMode, setTestMode,
 } from '../systems/Settings';
 import { isTouchDevice } from '../systems/TouchControls';
-import { refreshMusic } from '../systems/Music';
+import { applyMusicVolume, refreshMusic } from '../systems/Music';
+import { playSfx } from '../systems/Sfx';
 import { UiScene } from './UiScene';
 
 /** One tap of a volume arrow. Ten steps across the whole range. */
@@ -46,7 +48,7 @@ export class OptionsScene extends UiScene {
   }
 
   private rows(): OptionRow[] {
-    const rows: OptionRow[] = [this.volumeRow(), this.fullscreenRow()];
+    const rows: OptionRow[] = [this.musicRow(), this.sfxRow(), this.fullscreenRow()];
     // Handedness only means something where there is a thumb to favour.
     if (isTouchDevice()) rows.push(this.stickRow());
     rows.push(this.testRow());
@@ -113,25 +115,40 @@ export class OptionsScene extends UiScene {
     );
   }
 
-  private volumeRow(): OptionRow {
-    const v = getVolume();
-    const filled = Math.round(v * 10);
-
+  /** Ten cells and a percentage, the same widget for both levels. */
+  private levelRow(
+    label: string, value: number, apply: (v: number) => void
+  ): OptionRow {
+    const filled = Math.round(value * 10);
     const step = (delta: number) => {
-      setVolume(getVolume() + delta);
-      // The sound manager is game-wide, so this reaches whatever is playing.
-      this.sound.volume = getVolume();
-      refreshMusic(this);
+      apply(Math.min(1, Math.max(0, value + delta)));
       this.redraw();
     };
 
     return {
-      label: 'VOLUME',
+      label,
       value: '▮'.repeat(filled) + '▯'.repeat(10 - filled),
-      suffix: `${Math.round(v * 100)}%`,
+      suffix: `${Math.round(value * 100)}%`,
       onLeft: () => step(-VOLUME_STEP),
       onRight: () => step(VOLUME_STEP),
     };
+  }
+
+  private musicRow(): OptionRow {
+    return this.levelRow('MUSIQUE', getMusicVolume(), v => {
+      setMusicVolume(v);
+      applyMusicVolume();
+      // Crossing zero either starts the track or stops fetching it at all.
+      refreshMusic(this);
+    });
+  }
+
+  private sfxRow(): OptionRow {
+    return this.levelRow('SONS', getSfxVolume(), v => {
+      setSfxVolume(v);
+      // Play one at the new level, so the setting is audible while you set it.
+      playSfx(this, 'pickup');
+    });
   }
 
   private fullscreenRow(): OptionRow {

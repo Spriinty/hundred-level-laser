@@ -23,6 +23,8 @@ function down(v: number | boolean): boolean {
  */
 export class Pad {
   private startWasDown = false;
+  private confirmWasDown = false;
+  private dirWasDown: Direction = null;
 
   constructor(private scene: Phaser.Scene) {}
 
@@ -74,12 +76,23 @@ export class Pad {
     return fired;
   }
 
+  /**
+   * The direction as a single event rather than a held state, for menus: a
+   * stick pushed and kept there should step once, not sixty times a second.
+   */
+  directionJustPressed(): Direction {
+    const now = this.direction;
+    const fired = now !== null && now !== this.dirWasDown ? now : null;
+    this.dirWasDown = now;
+    return fired;
+  }
+
   /** A or Start, edge-triggered — for menus, where either should confirm. */
   confirmJustPressed(): boolean {
     const p = this.pad;
     const held = down(p?.A ?? false) || (p?.buttons[9]?.pressed ?? false);
-    const fired = held && !this.startWasDown;
-    this.startWasDown = held;
+    const fired = held && !this.confirmWasDown;
+    this.confirmWasDown = held;
     return fired;
   }
 }

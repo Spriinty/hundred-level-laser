@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { TILE_SIZE, LASER_COLORS } from '../config/constants';
-import { getVolume } from '../systems/Settings';
+import { preloadSfx } from '../systems/Sfx';
+import { UI_FONT } from '../config/fonts';
 
 // All asset keys that can be loaded from files in public/assets/
 const FILE_ASSETS = [
@@ -22,10 +23,14 @@ export class BootScene extends Phaser.Scene {
   }
 
   preload(): void {
+    this.buildLoadingScreen();
+
     // Track which files are missing so we can generate fallbacks
     this.load.on('loaderror', (file: Phaser.Loader.File) => {
       this.missing.add(file.key);
     });
+
+    preloadSfx(this);
 
     // Attempt to load each asset from public/assets/
     for (const key of FILE_ASSETS) {
@@ -34,10 +39,6 @@ export class BootScene extends Phaser.Scene {
   }
 
   create(): void {
-    // The sound manager is game-wide, so one call here carries the player's
-    // volume across every scene and every track.
-    this.sound.volume = getVolume();
-
     // Generate programmatic fallback for every missing asset
     if (this.needs('wall'))         this.makeWall();
     if (this.needs('player'))       this.makePlayer();
@@ -65,7 +66,55 @@ export class BootScene extends Phaser.Scene {
     this.makeFlame();
     this.makeGlow();
 
-    this.scene.start('Menu');
+    // The web font is requested by the page, not by Phaser, and text laid out
+    // before it arrives is measured against the fallback and has to be redrawn.
+    // Holding the menu until the font is ready avoids that flash of the wrong
+    // face — and if it never loads, the promise still settles.
+    document.fonts.ready.then(() => this.scene.start('Menu'));
+  }
+
+  /**
+   * An old-fashioned progress bar: an outlined frame filled a notch at a time
+   * rather than a smooth sweep, so it reads as a loading bar from a machine
+   * that had to count its bytes.
+   */
+  private buildLoadingScreen(): void {
+    const w = this.scale.width;
+    const h = this.scale.height;
+    const barW = Math.min(420, w * 0.66);
+    const barH = 26;
+    const x = (w - barW) / 2;
+    const y = h * 0.56;
+
+    this.add.text(w / 2, h * 0.4, 'HUNDRED LEVEL\nLASER', {
+      fontFamily: UI_FONT, fontSize: '54px', color: '#4488ff',
+      align: 'center', stroke: '#002266', strokeThickness: 6,
+    }).setOrigin(0.5);
+
+    const frame = this.add.graphics();
+    frame.lineStyle(2, 0x3366aa, 1);
+    frame.strokeRect(x, y, barW, barH);
+
+    const fill = this.add.graphics();
+    const label = this.add.text(w / 2, y + barH + 22, 'CHARGEMENT  0%', {
+      fontFamily: UI_FONT, fontSize: '22px', color: '#88aaff',
+    }).setOrigin(0.5);
+
+    const cells = 20;
+    const pad = 3;
+    const cellW = (barW - pad * 2) / cells;
+
+    this.load.on('progress', (value: number) => {
+      fill.clear();
+      fill.fillStyle(0x00ff88, 1);
+      // Whole cells only: a partly drawn one would be a smooth bar wearing a
+      // segmented costume.
+      const lit = Math.floor(value * cells);
+      for (let i = 0; i < lit; i++) {
+        fill.fillRect(x + pad + i * cellW, y + pad, cellW - 2, barH - pad * 2);
+      }
+      label.setText(`CHARGEMENT  ${Math.round(value * 100)}%`);
+    });
   }
 
   private needs(key: string): boolean {

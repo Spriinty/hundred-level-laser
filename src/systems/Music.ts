@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { isMusicOn } from './Settings';
+import { isMusicOn, getMusicVolume } from './Settings';
 
 export type Track = 'menu' | 'game';
 
@@ -60,7 +60,21 @@ export function prefetchMusic(scene: Phaser.Scene, track: Track): void {
   fetch(scene, track);
 }
 
-/** Re-apply the music setting after the player toggles it in the menu. */
+/**
+ * Push the music level onto whatever is already playing.
+ *
+ * `BaseSound` does not declare `volume` — only the web audio, HTML5 audio and
+ * no-audio implementations do, and which one Phaser picked depends on the
+ * browser — so this asks for the method rather than assuming it.
+ */
+export function applyMusicVolume(): void {
+  const v = getMusicVolume();
+  sounds.forEach(sound => {
+    (sound as unknown as { setVolume?: (value: number) => void }).setVolume?.(v);
+  });
+}
+
+/** Re-apply the music setting after the player changes it. */
 export function refreshMusic(scene: Phaser.Scene): void {
   if (!isMusicOn()) {
     sounds.forEach(s => s.pause());
@@ -74,7 +88,7 @@ export function refreshMusic(scene: Phaser.Scene): void {
 function resume(scene: Phaser.Scene, track: Track): void {
   let sound = sounds.get(track);
   if (!sound) {
-    sound = scene.sound.add(KEYS[track], { loop: true, volume: 1 });
+    sound = scene.sound.add(KEYS[track], { loop: true, volume: getMusicVolume() });
     sounds.set(track, sound);
   }
 

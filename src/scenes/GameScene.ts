@@ -20,9 +20,14 @@ import { LevelGenerator } from '../systems/LevelGenerator';
 import { computeLayout, worldZoom, cameraBounds, fs, sp, type Layout } from '../systems/Layout';
 import { TouchControls, isTouchDevice } from '../systems/TouchControls';
 import { Pad } from '../systems/Pad';
-import { getStickSide, isTestMode } from '../systems/Settings';
-import { playMusic } from '../systems/Music';
+import { playSfx } from '../systems/Sfx';
+import {
+  getStickSide, isTestMode,
+  getMusicVolume, setMusicVolume, getSfxVolume, setSfxVolume,
+} from '../systems/Settings';
+import { playMusic, applyMusicVolume, refreshMusic } from '../systems/Music';
 import { Thruster, PLAYER_THRUSTER, BOSS_THRUSTER, ENEMY_THRUSTERS, type ThrusterStyle } from '../systems/Thruster';
+import { UI_FONT } from '../config/fonts';
 
 type PickupType = 'life' | 'extra-life' | 'dual' | 'rear' | 'shield' | 'bomb' | 'armor' | 'laser-part';
 const PICKUP_TYPES: PickupType[] = ['life', 'extra-life', 'dual', 'rear', 'shield', 'bomb', 'armor'];
@@ -575,7 +580,7 @@ export class GameScene extends Phaser.Scene {
     // thumb-sized rather than glyph-sized.
     this.pauseBtn = this.addUI(
       this.add.text(0, 0, '\u275a\u275a', {
-        fontFamily: 'monospace', fontSize: '22px', color: '#88bbff',
+        fontFamily: UI_FONT, fontSize: '22px', color: '#88bbff',
         padding: { x: 12, y: 10 },
       }).setOrigin(0, 0).setScrollFactor(0).setDepth(402).setAlpha(0.75).setVisible(false)
     );
@@ -648,7 +653,7 @@ export class GameScene extends Phaser.Scene {
   // ─── HUD ───────────────────────────────────────────────────────────────────
 
   private buildHUD(): void {
-    const mono = (color: string) => ({ fontFamily: 'monospace', fontSize: '16px', color });
+    const mono = (color: string) => ({ fontFamily: UI_FONT, fontSize: '16px', color });
 
     // Opaque backing for the HUD strip, so no world geometry shows through.
     this.hudPanelBg = this.addUI(
@@ -705,7 +710,7 @@ export class GameScene extends Phaser.Scene {
     // reference pixels, scaled with the rest of the HUD at layout time.
     const add = (label: string, color: string, row: number, dx: number, onClick?: () => void) => {
       const t = this.addUI(
-        this.add.text(0, 0, label, { fontFamily: 'monospace', fontSize: '15px', color })
+        this.add.text(0, 0, label, { fontFamily: UI_FONT, fontSize: '15px', color })
           .setScrollFactor(0).setDepth(210).setOrigin(0, 1)
       );
       t.setData('row', row);
@@ -783,7 +788,7 @@ export class GameScene extends Phaser.Scene {
     );
     this.levelText = this.addUI(
       this.add.text(0, 0, `Niveau ${this.level}/${MAX_LEVEL}`, {
-        fontFamily: 'monospace', fontSize: '22px', color: '#88bbff',
+        fontFamily: UI_FONT, fontSize: '22px', color: '#88bbff',
       }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(200)
     );
   }
@@ -882,7 +887,7 @@ export class GameScene extends Phaser.Scene {
         : L.hud.x + L.hud.w - pad - (PLAYER_MAX_HP - 1 - i) * step;
 
       const t = this.add.text(x, y, filled ? '♥' : '♡', {
-        fontFamily: 'monospace',
+        fontFamily: UI_FONT,
         fontSize: size,
         color: filled ? '#ff4466' : '#443344',
       }).setOrigin(L.portrait ? 0 : 0.5, 0).setScrollFactor(0).setDepth(200);
@@ -1043,6 +1048,7 @@ export class GameScene extends Phaser.Scene {
 
     // Charged per trigger pull, not per bullet: the dual and rear pickups
     // would otherwise cost heat for being collected.
+    playSfx(this, 'shot');
     this.heat += heatPerShot(rate);
     if (this.heat >= HEAT_MAX) {
       this.heat = HEAT_MAX;
@@ -1271,6 +1277,7 @@ export class GameScene extends Phaser.Scene {
     bullet.setDisplaySize(w, Math.round(w * ratio))
       .setOrigin(0.5, 0.5).setActive(true).setVisible(true).setDepth(9);
     bullet.setRotation(angle + Math.PI / 2);
+    playSfx(this, aimed ? 'enemyAimed' : 'enemyShot');
     const ebr = 11;
     body.setCircle(ebr, bullet.displayOriginX - ebr, bullet.displayOriginY - ebr);
     body.reset(x, y);
@@ -1450,6 +1457,7 @@ export class GameScene extends Phaser.Scene {
         break;
     }
 
+    playSfx(this, 'pickup');
     this.flashScreen(LASER_COLORS[this.laserTier], 0.2, 150);
   }
 
@@ -1483,6 +1491,7 @@ export class GameScene extends Phaser.Scene {
       onComplete: () => ring.destroy(),
     });
 
+    playSfx(this, 'bomb');
     this.flashScreen(0xffaa00, 0.6, 300);
   }
 
@@ -1710,7 +1719,10 @@ export class GameScene extends Phaser.Scene {
 
     this.portalFlash(portal);
     this.portalFlash(exit);
-    if (ship === this.player) this.flashScreen(0x66ddff, 0.25, 180);
+    if (ship === this.player) {
+      playSfx(this, 'portal');
+      this.flashScreen(0x66ddff, 0.25, 180);
+    }
   }
 
   /** Whether a world point sits on a walkable tile. */
@@ -1833,7 +1845,7 @@ export class GameScene extends Phaser.Scene {
 
     const msg = this.addUI(
       this.add.text(cx, cy - sp(L, 40), text, {
-        fontFamily: 'monospace', fontSize: fs(L, 28),
+        fontFamily: UI_FONT, fontSize: fs(L, 28),
         color, stroke: '#000000', strokeThickness: 6,
       }).setScrollFactor(0).setOrigin(0.5).setDepth(300)
     );
@@ -1908,7 +1920,7 @@ export class GameScene extends Phaser.Scene {
         const big = label !== 'GO !';
         const t = this.addUI(
           this.add.text(L.view.x + L.view.w / 2, L.view.y + L.view.h / 2, label, {
-            fontFamily: 'monospace',
+            fontFamily: UI_FONT,
             fontSize: fs(L, big ? 110 : 80),
             color: big ? '#ffffff' : '#00ff88',
             stroke: '#000033',
@@ -1968,12 +1980,12 @@ export class GameScene extends Phaser.Scene {
     );
 
     const title = this.addUI(this.add.text(cx, cy - sp(L, 110), 'PAUSE', {
-      fontFamily: 'monospace', fontSize: fs(L, 54), color: '#88bbff',
+      fontFamily: UI_FONT, fontSize: fs(L, 54), color: '#88bbff',
       stroke: '#002266', strokeThickness: 8,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(501));
 
     const resumeBtn = this.addUI(this.add.text(cx, cy - sp(L, 10), '[ REPRENDRE ]', {
-      fontFamily: 'monospace', fontSize: fs(L, 32), color: '#00ff88',
+      fontFamily: UI_FONT, fontSize: fs(L, 32), color: '#00ff88',
       stroke: '#004422', strokeThickness: 4,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(501)
       .setInteractive({ useHandCursor: true }));
@@ -1982,7 +1994,7 @@ export class GameScene extends Phaser.Scene {
     resumeBtn.on('pointerdown', () => this.resumeGame());
 
     const menuBtn = this.addUI(this.add.text(cx, cy + sp(L, 65), '[ RETOUR AU MENU ]', {
-      fontFamily: 'monospace', fontSize: fs(L, 24), color: '#ff6644',
+      fontFamily: UI_FONT, fontSize: fs(L, 24), color: '#ff6644',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(501)
       .setInteractive({ useHandCursor: true }));
     menuBtn.on('pointerover', () => menuBtn.setStyle({ color: '#ff9977' }));
@@ -1992,11 +2004,83 @@ export class GameScene extends Phaser.Scene {
       this.scene.start('Menu');
     });
 
-    const hint = this.addUI(this.add.text(cx, cy + sp(L, 120), 'ÉCHAP pour reprendre', {
-      fontFamily: 'monospace', fontSize: fs(L, 14), color: '#445566',
+    const hint = this.addUI(this.add.text(cx, cy + sp(L, 185), 'ÉCHAP pour reprendre', {
+      fontFamily: UI_FONT, fontSize: fs(L, 14), color: '#445566',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(501));
 
-    this.pauseOverlayGroup = [overlay, title, resumeBtn, menuBtn, hint];
+    this.pauseOverlayGroup = [
+      overlay, title, resumeBtn, menuBtn, hint,
+      ...this.pauseVolumeRow(cx, cy + sp(L, 115), 'MUSIQUE', getMusicVolume(), v => {
+        setMusicVolume(v);
+        applyMusicVolume();
+        // Crossing zero either starts the track or stops fetching it at all.
+        refreshMusic(this);
+      }),
+      ...this.pauseVolumeRow(cx, cy + sp(L, 148), 'SONS', getSfxVolume(), v => {
+        setSfxVolume(v);
+        playSfx(this, 'pickup');
+      }),
+    ];
+  }
+
+  /**
+   * One volume row for the pause overlay.
+   *
+   * Built here rather than by borrowing the options screen: that one lives on
+   * a UiScene and owns the whole canvas, while this has to sit on the UI
+   * camera at the overlay's depth, over a game that is still on screen.
+   * Positions come from the text's measured width all the same, so the arrows
+   * cannot land on the bar.
+   */
+  private pauseVolumeRow(
+    cx: number, y: number, label: string, value: number, apply: (v: number) => void
+  ): Phaser.GameObjects.Text[] {
+    const L = this.layout;
+    const style = (color: string, size: number) => ({
+      fontFamily: UI_FONT, fontSize: fs(L, size), color,
+    });
+
+    const filled = Math.round(value * 10);
+    const bar = '▮'.repeat(filled) + '▯'.repeat(10 - filled);
+
+    const mk = (text: string, color: string, size: number, originX: number) =>
+      this.addUI(
+        this.add.text(0, y, text, style(color, size))
+          .setOrigin(originX, 0.5).setScrollFactor(0).setDepth(501)
+      );
+
+    const name = mk(label, '#88aaff', 16, 1);
+    const barText = mk(bar, '#cfe4ff', 16, 0.5);
+    const pct = mk(`${Math.round(value * 100)}%`, '#cfe4ff', 16, 0);
+    const left = mk('◀', '#ffcc44', 16, 0.5);
+    const right = mk('▶', '#ffcc44', 16, 0.5);
+
+    const gap = sp(L, 14);
+    const arrowW = left.displayWidth;
+    const barW = barText.displayWidth;
+
+    // Laid out from the centre outwards, so the row stays centred whatever
+    // the labels and the font turn out to measure.
+    barText.setX(cx);
+    left.setX(cx - barW / 2 - gap - arrowW / 2);
+    right.setX(cx + barW / 2 + gap + arrowW / 2);
+    name.setX(left.x - arrowW / 2 - gap);
+    pct.setX(right.x + arrowW / 2 + gap);
+
+    for (const [btn, delta] of [[left, -0.1], [right, 0.1]] as const) {
+      btn.setInteractive({ useHandCursor: true });
+      btn.on('pointerover', () => btn.setStyle({ color: '#ffee88' }));
+      btn.on('pointerout', () => btn.setStyle({ color: '#ffcc44' }));
+      btn.on('pointerdown', () => {
+        apply(Math.min(1, Math.max(0, value + delta)));
+        // Cheapest way to re-render: the overlay is rebuilt on resize anyway.
+        this.pauseOverlayGroup.forEach(o => o.destroy());
+        this.pauseOverlayGroup = [];
+        this.buildPauseOverlay();
+      });
+    }
+
+    return [name, left, barText, right, pct];
   }
 
   private resumeGame(): void {

@@ -1,6 +1,8 @@
 import { NameInput } from '../systems/NameInput';
 import { saveScore } from '../systems/Scores';
 import { isTouchDevice } from '../systems/TouchControls';
+import { Pad } from '../systems/Pad';
+import { wheelUp, wheelDown, wheelForward, wheelBack } from '../systems/NameWheel';
 import { UiScene } from './UiScene';
 
 const MAX_NAME = 12;
@@ -13,6 +15,7 @@ export class VictoryScene extends UiScene {
   private nameText!: Phaser.GameObjects.Text;
   private cursorVisible = true;
   private nameInput?: NameInput;
+  private pad!: Pad;
 
   constructor() {
     super({ key: 'Victory' });
@@ -25,6 +28,7 @@ export class VictoryScene extends UiScene {
     this.rank = -1;
     this.cursorVisible = true;
     this.nameInput = undefined;
+    this.pad = new Pad(this);
 
     this.time.addEvent({
       delay: 500, loop: true,
@@ -58,6 +62,10 @@ export class VictoryScene extends UiScene {
           this.trySubmit();
           return;
         }
+        if (e.key === 'ArrowDown')  { this.nameEntry = wheelDown(this.nameEntry, MAX_NAME); this.refreshNameText(); return; }
+        if (e.key === 'ArrowUp')    { this.nameEntry = wheelUp(this.nameEntry, MAX_NAME); this.refreshNameText(); return; }
+        if (e.key === 'ArrowRight') { this.nameEntry = wheelForward(this.nameEntry, MAX_NAME); this.refreshNameText(); return; }
+        if (e.key === 'ArrowLeft')  { this.nameEntry = wheelBack(this.nameEntry); this.refreshNameText(); return; }
         if (e.key === 'Backspace') {
           this.nameEntry = this.nameEntry.slice(0, -1);
         } else if (/^[a-zA-Z0-9 ]$/.test(e.key) && this.nameEntry.length < MAX_NAME) {
@@ -68,6 +76,27 @@ export class VictoryScene extends UiScene {
     }
 
     this.startResponsive();
+  }
+
+
+  update(): void {
+    if (this.submitted) return;
+
+    if (this.pad.confirmJustPressed()) {
+      this.trySubmit();
+      return;
+    }
+
+    // Wind the last character, step between slots. The same ring the arrow
+    // keys drive, so the two controls never disagree about what is selected.
+    switch (this.pad.directionJustPressed()) {
+      case 'down':  this.nameEntry = wheelDown(this.nameEntry, MAX_NAME); break;
+      case 'up':    this.nameEntry = wheelUp(this.nameEntry, MAX_NAME); break;
+      case 'right': this.nameEntry = wheelForward(this.nameEntry, MAX_NAME); break;
+      case 'left':  this.nameEntry = wheelBack(this.nameEntry); break;
+      default: return;
+    }
+    this.refreshNameText();
   }
 
   protected draw(): void {
@@ -131,7 +160,9 @@ export class VictoryScene extends UiScene {
       );
     } else {
       this.own(
-        this.add.text(cx, height * 0.578, 'A-Z · 0-9 · BACKSPACE · ENTRÉE pour valider',
+        this.add.text(cx, height * 0.578, this.pad.connected
+          ? 'HAUT/BAS lettre · DROITE slot suivant · GAUCHE effacer · A valider'
+          : 'A-Z · 0-9 · FLÈCHES · BACKSPACE · ENTRÉE pour valider',
           this.mono(15, '#445566', { align: 'center', wordWrap: { width: width * 0.9 } })
         ).setOrigin(0.5)
       );

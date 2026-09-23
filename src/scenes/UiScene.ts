@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { computeLayout, fs, sp, type Layout } from '../systems/Layout';
 import { playMusic } from '../systems/Music';
+import { UI_FONT } from '../config/fonts';
 
 /**
  * Base class for the full-screen menu scenes (menu, game over, victory,
@@ -53,7 +54,7 @@ export abstract class UiScene extends Phaser.Scene {
   }
 
   protected mono(size: number, color: string, extra: object = {}): Phaser.Types.GameObjects.Text.TextStyle {
-    return { fontFamily: 'monospace', fontSize: this.fs(size), color, ...extra };
+    return { fontFamily: UI_FONT, fontSize: this.fs(size), color, ...extra };
   }
 
   /**
