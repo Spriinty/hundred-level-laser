@@ -21,6 +21,23 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       outDir: itch ? 'dist-itch' : 'dist',
+      // Stable filenames for itch, hashed ones everywhere else.
+      //
+      // A hash in the filename busts caches on a normal host. On itch it does
+      // the opposite: their CDN can serve a cached index.html pointing at the
+      // previous build's hash while the extracted folder only holds the new
+      // one, and every asset 404s. Since each upload replaces the whole
+      // directory and itch adds its own ?v= to index.html, nothing here needs
+      // a hash to begin with.
+      rollupOptions: itch
+        ? {
+            output: {
+              entryFileNames: 'assets/[name].js',
+              chunkFileNames: 'assets/[name].js',
+              assetFileNames: 'assets/[name][extname]',
+            },
+          }
+        : {},
     },
   };
 });
