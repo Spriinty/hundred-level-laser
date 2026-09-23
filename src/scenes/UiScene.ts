@@ -2,6 +2,9 @@ import Phaser from 'phaser';
 import { computeLayout, fs, sp, type Layout } from '../systems/Layout';
 import { playMusic } from '../systems/Music';
 import { Pad } from '../systems/Pad';
+
+/** How long a screen ignores input after opening, in ms. */
+const SETTLE_MS = 250;
 import { UI_FONT } from '../config/fonts';
 
 /**
@@ -36,7 +39,17 @@ export abstract class UiScene extends Phaser.Scene {
    */
   private focusItems: FocusItem[] = [];
   private focusIndex = 0;
-  private keysBound = false;
+
+  /**
+   * Nothing on a freshly opened screen accepts input until this moment.
+   *
+   * Menu screens stack their buttons at similar heights, so the button that
+   * opens a screen and the one that closes it can land within a few pixels of
+   * each other. A pointer still down when the scene swaps gets handed to
+   * whatever now sits underneath it, which walks straight back — and looks
+   * exactly like a key being spammed.
+   */
+  private acceptFrom = 0;
 
   /** Draw the scene against `this.layout`. Called on create and on resize. */
   protected abstract draw(): void;
@@ -47,7 +60,11 @@ export abstract class UiScene extends Phaser.Scene {
     // leaderboard, game over — never breaks the music.
     playMusic(this, 'menu');
     this.pad = new Pad(this);
+    // Rebound on every start: Phaser tears a scene's keyboard listeners down
+    // on shutdown, but the scene instance is reused, so a flag saying "already
+    // bound" would leave a revisited screen deaf.
     this.bindMenuKeys();
+    this.acceptFrom = this.time.now + SETTLE_MS;
     this.drawn = [];
     this.redraw();
     this.scale.on('resize', this.redraw, this);
@@ -110,14 +127,17 @@ export abstract class UiScene extends Phaser.Scene {
   }
 
   private activateFocus(): void {
+    if (!this.accepts()) return;
     this.focusItems[this.focusIndex]?.onSelect();
   }
 
   /** Bound once for the scene's life, not once per draw pass. */
-  private bindMenuKeys(): void {
-    if (this.keysBound) return;
-    this.keysBound = true;
+  /** Whether the screen has been open long enough to act on an input. */
+  private accepts(): boolean {
+    return this.time.now >= this.acceptFrom;
+  }
 
+  private bindMenuKeys(): void {
     this.input.keyboard?.on('keydown', (e: KeyboardEvent) => {
       // A screen with nothing registered leaves the keys to whoever else
       // wants them — the name entry, for one.
@@ -216,7 +236,7 @@ export abstract class UiScene extends Phaser.Scene {
     );
     btn.on('pointerover', () => btn.setStyle({ color: hover }));
     btn.on('pointerout', () => btn.setStyle({ color }));
-    btn.on('pointerdown', onClick);
+    btn.on('pointerdown', () => { if (this.accepts()) onClick(); });
     return btn;
   }
 }
